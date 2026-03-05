@@ -1,0 +1,22 @@
+diff a/tailwind.config.js b/tailwind.config.js	(rejected hunks)
+@@ -5,7 +5,17 @@ export default {
+     "./src/**/*.{js,ts,jsx,tsx}",
+   ],
+   theme: {
+-    extend: {},
++    extend: {
++      colors: {
++        obsidian: '#0B0B0B',
++        neoncyan: '#00FFFF',
++        terminalgreen: '#39FF14',
++      },
++      fontFamily: {
++        grotesk: ['"Space Grotesk"', 'sans-serif'],
++        mono: ['"JetBrains Mono"', 'monospace'],
++      },
++    },
+   },
+   plugins: [],
+-}
++}
+\ No newline at end of file

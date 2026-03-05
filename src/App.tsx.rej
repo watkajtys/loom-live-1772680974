@@ -1,0 +1,84 @@
+diff a/src/App.tsx b/src/App.tsx	(rejected hunks)
+@@ -1,7 +1,77 @@
++import { useEffect, useState } from 'react';
++import { useSearchParams } from 'react-router-dom';
++
+ export default function App() {
++  const [searchParams, setSearchParams] = useSearchParams();
++  const currentView = searchParams.get('view') || 'home';
++
+   return (
+-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+-      <h1 className="text-4xl font-bold">Loom Initialized</h1>
++    <div className="min-h-screen bg-obsidian text-neoncyan font-grotesk flex flex-col items-center justify-center p-8">
++      <h1 className="text-5xl font-bold mb-8 tracking-wider">Advoloom</h1>
++      
++      <div className="flex gap-4 mb-8">
++        <button 
++          onClick={() => setSearchParams({ view: 'home' })}
++          className={`px-4 py-2 border ${currentView === 'home' ? 'border-terminalgreen text-terminalgreen' : 'border-neoncyan text-neoncyan'} font-mono hover:bg-neoncyan/10 transition-colors`}
++        >
++          HOME
++        </button>
++        <button 
++          onClick={() => setSearchParams({ view: 'settings' })}
++          className={`px-4 py-2 border ${currentView === 'settings' ? 'border-terminalgreen text-terminalgreen' : 'border-neoncyan text-neoncyan'} font-mono hover:bg-neoncyan/10 transition-colors`}
++        >
++          SETTINGS
++        </button>
++        <button 
++          onClick={() => setSearchParams({ view: 'dashboard' })}
++          className={`px-4 py-2 border ${currentView === 'dashboard' ? 'border-terminalgreen text-terminalgreen' : 'border-neoncyan text-neoncyan'} font-mono hover:bg-neoncyan/10 transition-colors`}
++        >
++          DASHBOARD
++        </button>
++      </div>
++
++      <div className="border border-neoncyan/30 p-8 rounded-sm w-full max-w-2xl bg-black/50 backdrop-blur-sm">
++        {currentView === 'home' && (
++          <div className="space-y-4">
++            <h2 className="text-2xl text-terminalgreen mb-4">Welcome to Advoloom</h2>
++            <p className="font-mono text-sm leading-relaxed text-gray-300">
++              System initialization complete. Monitoring protocols active.
++            </p>
++          </div>
++        )}
++
++        {currentView === 'settings' && (
++          <div className="space-y-4">
++            <h2 className="text-2xl text-terminalgreen mb-4">System Settings</h2>
++            <div className="space-y-2 font-mono text-sm text-gray-300">
++              <div className="flex justify-between items-center border-b border-neoncyan/20 pb-2">
++                <span>Network Status:</span>
++                <span className="text-terminalgreen">ONLINE</span>
++              </div>
++              <div className="flex justify-between items-center border-b border-neoncyan/20 pb-2">
++                <span>Encryption Protocol:</span>
++                <span className="text-neoncyan">ACTIVE</span>
++              </div>
++            </div>
++          </div>
++        )}
++
++        {currentView === 'dashboard' && (
++          <div className="space-y-4">
++            <h2 className="text-2xl text-terminalgreen mb-4">Operations Dashboard</h2>
++            <div className="grid grid-cols-2 gap-4 font-mono text-sm">
++              <div className="border border-neoncyan/20 p-4">
++                <div className="text-gray-400 mb-1">Active Nodes</div>
++                <div className="text-2xl text-terminalgreen">1,024</div>
++              </div>
++              <div className="border border-neoncyan/20 p-4">
++                <div className="text-gray-400 mb-1">Data Throughput</div>
++                <div className="text-2xl text-neoncyan">8.4 TB/s</div>
++              </div>
++            </div>
++          </div>
++        )}
++      </div>
+     </div>
+-  )
+-}
++  );
++}
+\ No newline at end of file
