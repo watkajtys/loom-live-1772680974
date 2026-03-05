@@ -1,0 +1,1537 @@
+import os
+import shutil
+import time
+import logging
+import subprocess
+import concurrent.futures
+import re
+import json
+import random
+from enum import Enum
+from datetime import datetime
+from pathlib import Path
+
+import google.generativeai as genai
+from google.api_core import exceptions
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from dotenv import load_dotenv
+
+from loom.core.state import ConductorState, LoopIteration, AttemptRecord, BacklogTask, TaskType
+from loom.environment.git import GitClient
+from loom.environment.phoenix import PhoenixServer
+from loom.agents.stitch import StitchClient, StitchQuotaError
+from loom.agents.jules import JulesClient
+from loom.agents.mock_jules import MockJulesClient
+from loom.agents.architect import ArchitectAgent
+from loom.agents.vision import VisionAgent
+from loom.agents.pm import PMAgent
+from loom.agents.vibe import VibeAgent
+from loom.agents.reflection import ReflectionAgent
+
+load_dotenv(override=True)
+
+logger = logging.getLogger("loom")
+
+class LoomPhase(Enum):
+    INSPIRATION = "Inspiration"
+    DESIGN = "Design"
+    IMPLEMENTATION = "Implementation"
+    VALIDATION = "Validation"
+    REFLECTION = "Reflection"
+    DECISION = "Decision"
+
+logger = logging.getLogger("loom")
+
+class Overseer:
+    def __init__(self):
+        self.state = ConductorState.load()
+        self.git = GitClient()
+        
+        # Use service name for PocketBase inside Docker
+        pb_host = os.getenv("PB_HOSTNAME", "loom-pocketbase")
+        self.pb_url = f"http://{pb_host}:8090"
+        
+        # Use Mock Jules if requested
+        if os.getenv("USE_MOCK_JULES", "").lower() == "true":
+            logger.info("[bold yellow]Using Mock Jules Client (Local Gemini)[/bold yellow]", extra={"markup": True})
+            self.jules = MockJulesClient()
+        else:
+            self.jules = JulesClient()
+            
+        self.stitch = StitchClient()
+        self.phoenix = PhoenixServer()
+        
+        # Iteration-specific state
+        self.current_iteration_record = None
+        self.current_brainstorm_output = None
+        self.happiness_score = 0
+        self.last_critique = ""
+        self.app_screenshot = None
+        self.app_screenshot_path = None
+        self.patch_dest_rel = None
+        
+        # Long-term memory
+        self.lab_memory = {}
+        memory_path = Path("loom_memory.json")
+        if memory_path.exists() and memory_path.is_dir():
+            shutil.rmtree(memory_path)
+            
+        if memory_path.exists():
+            try:
+                with open(memory_path, "r", encoding="utf-8") as f:
+                    self.lab_memory = json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load loom_memory.json: {e}")
+        else:
+            with open(memory_path, "w", encoding="utf-8") as f:
+                json.dump({"archive_count": 0, "technical_learnings": [], "past_projects": []}, f)
+        
+        # Ensure artifacts directory exists
+        os.makedirs("viewer/public/artifacts", exist_ok=True)
+        
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not found. Overseer will be lobotomized.")
+        else:
+            genai.configure(api_key=api_key)
+            # Principal Overseer (Logic & Planning)
+            self.model = genai.GenerativeModel('gemini-3.1-pro-preview')
+            # Specialized Reviewers (Fast & Efficient)
+            self.architect = ArchitectAgent('gemini-3-flash-preview')
+            self.vision = VisionAgent('gemini-3-flash-preview')
+            self.pm = PMAgent('gemini-3.1-pro-preview')
+            self.vibe = VibeAgent('gemini-3.1-pro-preview')
+            self.reflection = ReflectionAgent('gemini-3-flash-preview')
+
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=4, max=60),
+        retry=(
+            retry_if_exception_type(exceptions.DeadlineExceeded) |
+            retry_if_exception_type(exceptions.ServiceUnavailable) |
+            retry_if_exception_type(exceptions.InternalServerError) |
+            retry_if_exception_type(exceptions.ResourceExhausted)
+        ),
+        reraise=True
+    )
+    def _generate_content_with_retry(self, model, content, generation_config=None):
+        """Helper to call Gemini with robust exponential backoff retries."""
+        try:
+            # Add a request-level timeout to force a DeadlineExceeded exception
+            logger.info(f"Sending request to Gemini ({model.model_name})...")
+            return model.generate_content(content, generation_config=generation_config, request_options={"timeout": 360})
+        except Exception as e:
+            logger.warning(f"Gemini call failed (attempting retry): {e}")
+            raise e
+
+    def think(self, context: str, image_data: bytes = None, temperature: float = 0.7) -> str:
+        """Consults the LLM for the next move with a hidden nonce to avoid caching."""
+        if not hasattr(self, 'model'): return "Mock thought: Proceed."
+        
+        import uuid
+        nonce = uuid.uuid4().hex[:8]
+        prompt = f"You are the Overseer of Project Loom. We're building software together. [Request ID: {nonce}] Context: {context}"
+        generation_config = genai.types.GenerationConfig(temperature=temperature)
+        
+        if image_data:
+            content = [prompt, {"mime_type": "image/png", "data": image_data}]
+            response = self._generate_content_with_retry(self.model, content, generation_config=generation_config)
+        else:
+            response = self._generate_content_with_retry(self.model, prompt, generation_config=generation_config)
+        return response.text
+
+    def _take_screenshot(self, url_or_path: str, wait_ms: int = 5000, return_logs: bool = False):
+        from playwright.sync_api import sync_playwright
+        logs = []
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            # Set standard desktop viewport
+            context = browser.new_context(viewport={'width': 1920, 'height': 1080})
+            page = context.new_page()
+            
+            if return_logs:
+                page.on("console", lambda msg: logs.append(f"[{msg.type}] {msg.text}"))
+                page.on("pageerror", lambda exc: logs.append(f"[uncaught error] {exc}"))
+
+            if url_or_path.startswith("http"):
+                page.goto(url_or_path)
+            else:
+                # Handle Windows paths for file:// URIs
+                clean_path = url_or_path.replace('\\', '/')
+                page.goto(f"file:///{clean_path}")
+            page.wait_for_timeout(wait_ms)
+            screenshot = page.screenshot()
+            browser.close()
+            
+            if return_logs:
+                return screenshot, logs
+            return screenshot
+
+    def evaluate_architecture(self, branch_name: str) -> tuple[int, str, list]:
+        return self.architect.evaluate(app_meta=self.state.app_meta)
+
+    def evaluate_happiness(self, target_route: str = "/") -> tuple[int, str, bytes]:
+        score = 10 
+        critique = "No critique."
+        app_screenshot = None
+        try:
+            self.phoenix.spawn()
+            self.phoenix.wait_for_ready()
+            logger.info(f"Phoenix Server is up. App is running. Verifying route {target_route} with Vision...")
+            
+            try:
+                # 1. Capture Live App
+                if self.app_screenshot_path and os.path.exists(f"viewer/public/{self.app_screenshot_path}"):
+                    logger.info(f"Using Playwright evidence screenshot: {self.app_screenshot_path}")
+                    with open(f"viewer/public/{self.app_screenshot_path}", "rb") as f:
+                        app_screenshot = f.read()
+                    console_logs = [] 
+                else:
+                    app_screenshot, console_logs = self._take_screenshot(f"http://localhost:{self.phoenix.port}{target_route}", return_logs=True)
+                
+                # 2. Collect ALL reference images for this iteration
+                ref_images = []
+                # Always include the primary reference.png if it exists
+                ref_primary = os.path.abspath("app/design/reference.png")
+                if os.path.exists(ref_primary):
+                    with open(ref_primary, "rb") as f:
+                        ref_images.append(f.read())
+                
+                # Look for other images in the artifacts directory for this iteration
+                artifact_dir = "viewer/public/artifacts"
+                if os.path.exists(artifact_dir):
+                    iter_prefix = f"iter_{self.state.current_iteration}_"
+                    for f_name in os.listdir(artifact_dir):
+                        if f_name.startswith(iter_prefix) and f_name.endswith(".png"):
+                            # Filter for images that were part of the chosen design path
+                            if "evolved" in f_name or "seed" in f_name or "theme" in f_name:
+                                with open(os.path.join(artifact_dir, f_name), "rb") as f:
+                                    ref_images.append(f.read())
+
+                if hasattr(self, 'vision'):
+                    score, critique = self.vision.evaluate_happiness(
+                        app_screenshot=app_screenshot,
+                        ref_images=ref_images,
+                        app_meta=self.state.app_meta,
+                        inspiration_goal=active_task.description,
+                        target_route=target_route,
+                        console_logs=console_logs
+                    )
+            except Exception as e:
+                logger.error(f"Vision verification failed: {e}")
+                score = 5
+                critique = f"Vision failed: {e}"
+
+        except Exception as e:
+            logger.error(f"Happiness Check Failed: {e}")
+            score = 0
+            critique = f"Server failed to boot: {e}"
+        finally:
+            self.phoenix.kill()
+        return score, critique, app_screenshot
+
+    def _get_repo_info(self):
+        url = self.git.get_remote_url()
+        parts = url.split("/")
+        repo = parts[-1].replace(".git", "")
+        owner = parts[-2]
+        return owner, repo
+
+    def _update_env_file(self, key: str, value: str):
+        """Updates a specific key in the .env file."""
+        env_path = ".env"
+        if not os.path.exists(env_path):
+            with open(env_path, "w") as f:
+                f.write(f"{key}={value}\n")
+            return
+
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+
+        found = False
+        new_lines = []
+        for line in lines:
+            if line.startswith(f"{key}="):
+                new_lines.append(f"{key}={value}\n")
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found:
+            new_lines.append(f"{key}={value}\n")
+
+        with open(env_path, "w") as f:
+            f.writelines(new_lines)
+        logger.info(f"Updated {env_path} with {key}={value}")
+
+    def ensure_scaffold(self):
+        """Ensures that a basic React + Vite + Tailwind project exists in the app/ directory."""
+        if os.path.exists("app/src"):
+            return
+
+        logger.info("[bold yellow]No React project detected. Scaffolding initial application...[/bold yellow]", extra={"markup": True})
+        
+        # 1. Package.json
+        package_json = {
+            "name": "app",
+            "private": True,
+            "version": "0.0.0",
+            "type": "module",
+            "scripts": {
+                "dev": "vite --host",
+                "build": "vite build",
+                "lint": "eslint .",
+                "preview": "vite preview",
+                "test:e2e": "playwright test"
+            },
+            "dependencies": {
+                "react": "^19.0.0",
+                "react-dom": "^19.0.0",
+                "react-router-dom": "^7.0.0",
+                "lucide-react": "^0.454.0",
+                "pocketbase": "^0.21.1"
+            },
+            "devDependencies": {
+                "@playwright/test": "^1.42.0",
+                "@types/node": "^20.11.24",
+                "@vitejs/plugin-react": "^4.3.0",
+                "autoprefixer": "^10.4.19",
+                "postcss": "^8.4.38",
+                "tailwindcss": "^3.4.3",
+                "typescript": "^5.2.2",
+                "vite": "^6.0.0"
+            }
+        }
+        
+        os.makedirs("app/src", exist_ok=True)
+        os.makedirs("app/public", exist_ok=True)
+        
+        import json
+        with open("app/package.json", "w") as f:
+            json.dump(package_json, f, indent=2)
+            
+        # 2. Vite Config
+        with open("app/vite.config.ts", "w") as f:
+            f.write("""import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  server: { host: '127.0.0.1' },
+  plugins: [react()],
+})
+""")
+
+        # 3. Tailwind Config
+        with open("app/tailwind.config.js", "w") as f:
+            f.write("""/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+""")
+
+        # 4. PostCSS Config
+        with open("app/postcss.config.js", "w") as f:
+            f.write("""export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+""")
+
+        # 4.5 .gitignore
+        with open("app/.gitignore", "w") as f:
+            f.write("""node_modules
+dist
+dist-ssr
+*.local
+.vscode
+.idea
+.DS_Store
+playwright-report
+test-results
+evidence.png
+jules.patch
+""")
+
+        # 5. Index.html
+        with open("app/index.html", "w") as f:
+            f.write("""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Loom App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+""")
+
+        # 5.5 Playwright Config
+        with open("app/playwright.config.ts", "w") as f:
+            f.write("""import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://127.0.0.1:5173',
+    trace: 'on-first-retry',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+});
+""")
+        os.makedirs("app/tests", exist_ok=True)
+        with open("app/tests/verify.spec.ts", "w") as f:
+            f.write("""import { test, expect } from '@playwright/test';
+
+test('App initializes correctly', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('text=Loom Initialized')).toBeVisible();
+});
+""")
+
+        # 6. Basic SRC files
+        with open("app/src/index.css", "w") as f:
+            f.write("@tailwind base;\n@tailwind components;\n@tailwind utilities;\n")
+            
+        with open("app/src/App.tsx", "w") as f:
+            f.write("""export default function App() {
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <h1 className="text-4xl font-bold">Loom Initialized</h1>
+    </div>
+  )
+}
+""")
+
+        with open("app/src/main.tsx", "w") as f:
+            f.write("""import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+""")
+
+        # 7. Git Init & Commit
+        try:
+            self.git._run(["git", "init"], cwd="app")
+            self.git._run(["git", "add", "."], cwd="app")
+            self.git.commit("chore: initial scaffold")
+            logger.info("[bold green]Scaffolding complete.[/bold green]", extra={"markup": True})
+        except Exception as e:
+            logger.warning(f"Failed to commit scaffold: {e}")
+
+    def loop(self):
+        logger.info("[bold green]Starting Loom Loop...[/bold green]", extra={"markup": True})
+        self.git.ensure_remote()
+        self.ensure_scaffold()
+        
+        while True:
+            try:
+                self._consume_steering()
+                
+                # 0. THE VIBE CHECK (If sprint is ending)
+                if not self.state.backlog and not self.state.active_task_id:
+                    # Run holistic UX check if we have a visual reference
+                    if self.app_screenshot:
+                        try:
+                            vibe_tasks = self.vibe.check_vibe(self.app_screenshot, self.state.app_meta)
+                            if vibe_tasks:
+                                self.state.backlog.extend(vibe_tasks)
+                                self.state.save()
+                                logger.info("Vibe Agent requested UX polish before next sprint.")
+                        except Exception as e:
+                            logger.error(f"Vibe check failed: {e}")
+                
+                # 1. THE PM PHASE (If backlog is empty, generate new P1/P2 tasks)
+                if not self.state.backlog and not self.state.active_task_id:
+                    roadmap_path = "app/ROADMAP.md"
+                    roadmap = self.state.product_roadmap
+                    if os.path.exists(roadmap_path):
+                        with open(roadmap_path, "r", encoding="utf-8") as f:
+                            roadmap = f.read()
+                            
+                    learnings = ""
+                    if self.state.repo_memory.get("learnings"):
+                        for l in self.state.repo_memory["learnings"][-5:]:
+                            learnings += f"- {l.get('takeaways', '')}\n"
+                            
+                    new_tasks = self.pm.plan_next_sprint(self.state.app_meta, roadmap, learnings)
+                    if new_tasks:
+                        self.state.backlog.extend(new_tasks)
+                        self.state.save()
+                    else:
+                        logger.warning("PM Agent returned no tasks. Sleeping.")
+                        time.sleep(30)
+                        continue
+                
+                # 2. THE TRIAGE PHASE (Pick highest priority, setup branch)
+                active_task, branch_name = self._step_triage()
+                
+                if not active_task:
+                    time.sleep(10)
+                    continue
+
+                # 3. EXECUTION PHASE
+                try:
+                    # If happiness was already achieved on this task iteration, skip (resume logic)
+                    if self.current_iteration_record and self.current_iteration_record.happiness_score >= 8:
+                        logger.info("Happiness already achieved in this iteration. Skipping Design and Implementation.")
+                        self.happiness_score = self.current_iteration_record.happiness_score
+                        success_branch = self.current_iteration_record.successful_branch or branch_name
+                    else:
+                        if active_task.requires_design and active_task.type == TaskType.FEATURE:
+                            self._step_design(active_task)
+                        success_branch = self._step_implementation(branch_name, active_task)
+                    self._step_reflection(active_task)
+                except Exception as step_error:
+                    from loom.agents.stitch import StitchQuotaError
+                    if isinstance(step_error, StitchQuotaError):
+                        logger.error(f"Stitch Quota Exhausted. Entering 1-hour cooldown...")
+                        self.state.current_status = "BLOCKED_QUOTA: Sleeping for 1 hour..."
+                        self.state.save()
+                        time.sleep(3600)
+                        continue
+                    logger.error(f"Iteration aborted due to step error: {step_error}")
+                    self.happiness_score = 0
+                    self.last_critique = f"Aborted during phase {self.state.current_phase}: {step_error}"
+                    success_branch = branch_name
+
+                # 4. DECISION PHASE (Merge, mark done, or abandon)
+                self._step_decision(success_branch, active_task)
+                
+                time.sleep(10)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                logger.error(f"Critical loop error: {e}")
+                time.sleep(30)
+
+    def _consume_steering(self):
+        """Merges all pending steering notes into a single string, moves them to history, and clears the pending list."""
+        if not self.state.pending_steer:
+            self.state.repo_memory["active_steering"] = ""
+            return
+
+        combined_notes = "\n".join([f"- {note}" for note in self.state.pending_steer])
+        steering_block = f"\n### [DIRECTOR'S STEERING FOR THIS ITERATION]\n{combined_notes}\n"
+        
+        # Move to history
+        for note in self.state.pending_steer:
+            self.state.steering_history.append({
+                "note": note,
+                "applied_at_iteration": self.state.current_iteration + 1,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        # Clear pending
+        self.state.pending_steer = []
+        self.state.repo_memory["active_steering"] = steering_block
+        self.state.save()
+        
+        logger.info(f"Consumed {len(combined_notes.splitlines())} steering notes for the next iteration.")
+
+    def _step_triage(self) -> tuple[BacklogTask, str]:
+        self.state.current_phase = LoomPhase.INSPIRATION.value
+        
+        # Sort backlog (P0 first, then P1, then P2)
+        # Assuming priority is an IntEnum where smaller is higher priority
+        self.state.backlog.sort(key=lambda t: t.priority)
+        
+        if not self.state.backlog:
+            return None, None
+            
+        # Pop highest priority task
+        active_task = self.state.backlog.pop(0)
+        self.state.active_task_id = active_task.id
+        self.state.save()
+        
+        # RESUME LOGIC: Check if we are already in an active iteration for this task
+        if self.state.history and self.state.history[-1].id == self.state.current_iteration and self.state.history[-1].goal == active_task.description:
+            branch_name = f"task-{active_task.id.lower()}"
+            logger.info(f"[bold cyan]Resuming existing Task {active_task.id} on branch: {branch_name}[/bold cyan]", extra={"markup": True})
+            self.current_iteration_record = self.state.history[-1]
+            self.git.checkout_branch(branch_name)
+            
+            try:
+                logger.info(f"Merging main into {branch_name} to ensure continuity...")
+                self.git._run(["git", "merge", "main"], cwd="app")
+            except Exception as e:
+                pass
+                
+            return active_task, branch_name
+
+        self.state.current_iteration += 1
+        branch_name = f"task-{active_task.id.lower()}"
+        
+        logger.info(f"[bold cyan]Starting Task {active_task.id}: {active_task.description} on branch: {branch_name}[/bold cyan]", extra={"markup": True})
+        
+        self.git.checkout_branch(branch_name)
+        
+        # Setup history record
+        self.current_iteration_record = LoopIteration(
+            id=self.state.current_iteration,
+            timestamp=datetime.now().isoformat(),
+            goal=active_task.description,
+            target_route=active_task.target_route,
+            data_model=active_task.data_model,
+            requires_design=active_task.requires_design,
+            test_scenario=active_task.test_scenario
+        )
+        self.state.history.append(self.current_iteration_record)
+        self.state.save()
+        
+        return active_task, branch_name
+
+    def _save_to_lab_memory(self):
+        """Saves the current inspiration goal to loom_memory.json if it's new."""
+        try:
+            name = "Unknown"
+            niche = active_task.description[:200]
+            
+            # Try to extract a name if the LLM provided one (optional based on prompt evolution)
+            if "[APP_META]" in (self.current_brainstorm_output or ""):
+                meta = self.current_brainstorm_output.split("[APP_META]")[1].split("[")[0].strip()
+                name = meta.split("\n")[0].replace("Name:", "").strip()
+
+            new_project = {
+                "name": name,
+                "niche": niche,
+                "pitch": active_task.description,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            # Load fresh copy to avoid overwrite races
+            if os.path.exists("loom_memory.json"):
+                with open("loom_memory.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {"archive_count": 0, "technical_learnings": [], "past_projects": []}
+            
+            # Avoid duplicates
+            if not any(p.get("pitch") == new_project["pitch"] for p in data.get("past_projects", [])):
+                data.setdefault("past_projects", []).append(new_project)
+                data["archive_count"] = len(data["past_projects"])
+                
+                with open("loom_memory.json", "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                logger.info(f"Saved project '{name}' to long-term lab memory.")
+        except Exception as e:
+            logger.warning(f"Failed to save to loom_memory.json: {e}")
+
+    def _step_design(self, active_task: BacklogTask):
+        self.state.current_phase = LoomPhase.DESIGN.value
+        design_file = os.path.abspath("app/design/latest_design.html")
+
+        # ITERATION 2+ (EVOLUTION)
+        if self.state.current_iteration > 1 and getattr(self.state, 'stitch_project_id', None):
+            logger.info(f"Iteration {self.state.current_iteration}: Designing feature pass for project...")
+            self.state.current_status = f"Designing feature pass in existing project..."
+            self.state.save()
+            
+            prompt = f"We are adding a new feature: '{active_task.description}'. This feature is part of the flow at: {active_task.target_route}. Please design the UI for this feature. Maintain the established navigation, theme, and visual identity of the project: {self.state.app_meta}."
+            
+            screen_id = getattr(self.state, 'stitch_screen_id', None)
+            screens = self.stitch.generate_or_edit_screen(
+                description=prompt,
+                project_id=self.state.stitch_project_id,
+                screen_id=screen_id
+            )
+            
+            if screens:
+                # Clear old design files to prevent stale references
+                if os.path.exists("app/design"):
+                    for f in os.listdir("app/design"):
+                        if f.endswith(".html") or f.endswith(".png"):
+                            try: os.remove(os.path.join("app/design", f))
+                            except: pass
+                else:
+                    os.makedirs("app/design", exist_ok=True)
+
+                ts = int(time.time())
+                for i, screen in enumerate(screens):
+                    html_content = screen["html"]
+                    new_screen_id = screen["screen_id"]
+                    
+                    # Capture all images for this screen
+                    for idx, img_bytes in enumerate(screen["images"]):
+                        evolved_rel_path = f"artifacts/iter_{self.state.current_iteration}_evolved_{i}_{idx}_{ts}.png"
+                        with open(f"viewer/public/{evolved_rel_path}", "wb") as f:
+                            f.write(img_bytes)
+                        
+                        # Save in app/design for Jules
+                        ref_name = "reference.png" if i == 0 and idx == 0 else f"reference_{i}_{idx}.png"
+                        with open(f"app/design/{ref_name}", "wb") as f:
+                            f.write(img_bytes)
+                            
+                        if i == 0 and idx == 0:
+                            self.current_iteration_record.chosen_design_path = evolved_rel_path
+                            self.current_iteration_record.chosen_theme_path = evolved_rel_path
+                    
+                    design_name = "latest_design.html" if i == 0 else f"latest_design_{i}.html"
+                    design_file = os.path.abspath(f"app/design/{design_name}")
+                    with open(design_file, "w", encoding="utf-8") as f:
+                        f.write(html_content)
+                    
+                    if i == 0:
+                        self.state.stitch_screen_id = new_screen_id
+                        
+                self.state.save()
+                
+                self.git.commit(f"design: generated new screen for iter {self.state.current_iteration}")
+            return
+
+        # ITERATION 1 (REVOLUTION - 5-5-5)
+        self.state.current_status = f"Overseer is generating 5 structural hypotheses for the product..."
+        self.state.save()
+        
+        # 1. OVERSEER GENERATES DIVERGENT HYPOTHESES
+        brief_prompt = f"""
+You have invented the following product: '{active_task.description}'.
+Your task is to generate 5 wildly different 'Structural Hypotheses' for how this product could be realized.
+
+Avoid the 'Premium' trap (generic SaaS aesthetics). Instead, think about the specific materiality and UX density required:
+- Is it a dense industrial tool?
+- An elastic, playful playground?
+- A raw, information-first terminal?
+- A spatial, non-linear canvas?
+- A rhythmic, narrative-driven sequence?
+
+Provide 5 concise (1-2 sentence) design briefs. Label them [BRIEF 1] through [BRIEF 5].
+"""
+        brief_response = self.think(brief_prompt, temperature=0.9)
+        logger.info(f"Divergent Briefs:\n{brief_response}")
+        
+        briefs = []
+        import re
+        for i in range(1, 6):
+            match = re.search(f"\\[BRIEF {i}\\](.*?)(?=\\[BRIEF|$)", brief_response, re.DOTALL)
+            if match: briefs.append(match.group(1).strip())
+        
+        if not briefs:
+             briefs = ["Dense Industrial", "Elastic Playground", "Raw Information Terminal", "Spatial Canvas", "Narrative Sequence"]
+        
+        self.current_iteration_record.base_briefs = briefs
+        self.state.save()
+        
+        if not self.state.stitch_project_id:
+            try:
+                self.state.stitch_project_id = self.stitch.create_project(self.state.project_name)
+                self.state.save()
+                self._update_env_file("STITCH_PROJECT_ID", self.state.stitch_project_id)
+            except Exception as e:
+                logger.error(f"Failed to create Stitch project: {e}")
+
+        # 2. PARALLEL DISCOVERY (5 Independent Base Seeds in 5 Unique Projects)
+        base_variants = []
+        if self.current_iteration_record.base_variants_data:
+            logger.info("Found existing base variants data. Loading from cache...")
+            for v_data in self.current_iteration_record.base_variants_data:
+                # Load the primary image back into memory for the vision critique
+                img_path = f"viewer/public/{v_data['img_path']}"
+                if os.path.exists(img_path):
+                    with open(img_path, "rb") as f:
+                        v_data["img"] = f.read()
+                    base_variants.append(v_data)
+            
+            if len(base_variants) < 5:
+                logger.warning(f"Only found {len(base_variants)}/5 valid base variants. Re-generating...")
+                base_variants = [] # Force re-generation if incomplete
+
+        if not base_variants:
+            logger.info(f"Generating 5 independent base seeds sequentially...")
+            self.state.current_status = "Phase 1: Generating 5 independent base seeds..."
+            self.state.save()
+            self.current_iteration_record.base_seed_paths = [None] * 5
+            design_prompt = f"Task: {active_task.description}\n\nTarget Route: {active_task.target_route}"
+            
+            results = []
+            for i in range(5):
+                if i > 0:
+                    logger.info("Waiting 5s between Stitch calls...")
+                    time.sleep(5)
+                    
+                brief = briefs[i]
+                try:
+                    unique_project_name = f"Loom {self.state.current_iteration} - Hypothesis {i+1}"
+                    p_id = self.stitch.create_project(unique_project_name)
+                    
+                    logger.info(f"Generating Seed {i+1}/5 in Project {p_id}...")
+                    screens = self.stitch.generate_or_edit_screen(
+                        description=f"{design_prompt}\n\nSTRUCTURAL HYPOTHESIS: {brief}",
+                        project_id=p_id,
+                        screen_id=None 
+                    )
+                    if screens:
+                        win = screens[0]
+                        ts = int(time.time())
+                        seed_rel_path = None
+                        for img_idx, img_bytes in enumerate(win["images"]):
+                            path = f"artifacts/iter_{self.state.current_iteration}_seed_{i+1}_{img_idx}_{ts}.png"
+                            with open(f"viewer/public/{path}", "wb") as f:
+                                f.write(img_bytes)
+                            if img_idx == 0: seed_rel_path = path
+                        
+                        self.current_iteration_record.base_seed_paths[i] = seed_rel_path
+                        self.state.save()
+                        
+                        results.append({
+                            "project_id": p_id, 
+                            "screen_id": win["screen_id"], 
+                            "html": win["html"], 
+                            "img": win["images"][0] if win["images"] else None,
+                            "img_path": seed_rel_path,
+                            "images_count": len(win["images"]),
+                            "brief": brief,
+                            "index": i
+                        })
+                except StitchQuotaError as sqe:
+                    logger.error(f"Stitch Quota Exhausted during genesis: {sqe}. Aborting pass.")
+                    break # Stop trying other seeds if we hit the quota
+                except Exception as e:
+                    logger.error(f"Failed to generate seed {i+1}: {e}")
+
+            base_variants = [r for r in results if r is not None]
+
+            if not base_variants:
+                raise Exception("Failed to generate any base design seeds.")
+            
+            # Save metadata for resumption (exclude raw bytes to keep state small)
+            metadata_only = []
+            for v in base_variants:
+                m = v.copy()
+                if "img" in m: del m["img"]
+                if "images" in m: del m["images"]
+                metadata_only.append(m)
+            self.current_iteration_record.base_variants_data = metadata_only
+            self.state.save()
+
+        # Overseer picks the best Base Seed
+        self.state.current_status = "Selecting the winning structural hypothesis..."
+        self.state.save()
+        
+        design_retry_count = 0
+        max_design_retries = 1
+        design_critique_context = ""
+
+        while design_retry_count <= max_design_retries:
+            try:
+                best_base_idx_raw, review_text = self.vision.review_seeds(
+                    inspiration_goal=active_task.description, 
+                    base_variants=base_variants
+                )
+                self.current_iteration_record.seed_review_critique = review_text
+                
+                if best_base_idx_raw == 0 and design_retry_count < max_design_retries:
+                    logger.warning("Overseer REJECTED all designs. Triggering a fresh design pass with critique...")
+                    design_critique_context = f"\n### PREVIOUS DESIGN CRITIQUE (WHY THE LAST 5 FAILED):\n{review_text}\n"
+                    
+                    # Wipe and re-generate
+                    self.current_iteration_record.base_seed_paths = [None] * 5
+                    self.current_iteration_record.base_variants_data = None
+                    
+                    # Re-run seed generation with critique context
+                    design_prompt = f"Task: {active_task.description}\n\nTarget Route: {active_task.target_route}\n{design_critique_context}"
+                    results = []
+                    for i in range(5):
+                        if i > 0: time.sleep(5)
+                        brief = briefs[i]
+                        try:
+                            unique_project_name = f"Loom {self.state.current_iteration} - Reroll {i+1}"
+                            p_id = self.stitch.create_project(unique_project_name)
+                            logger.info(f"Rerolling Seed {i+1}/5 in Project {p_id}...")
+                            screens = self.stitch.generate_or_edit_screen(description=f"{design_prompt}\n\nSTRUCTURAL HYPOTHESIS: {brief}", project_id=p_id)
+                            if screens:
+                                win = screens[0]
+                                ts = int(time.time())
+                                seed_rel_path = None
+                                for img_idx, img_bytes in enumerate(win["images"]):
+                                    path = f"artifacts/iter_{self.state.current_iteration}_reroll_{i+1}_{img_idx}_{ts}.png"
+                                    with open(f"viewer/public/{path}", "wb") as f: f.write(img_bytes)
+                                    if img_idx == 0: seed_rel_path = path
+                                self.current_iteration_record.base_seed_paths[i] = seed_rel_path
+                                self.state.save()
+                                results.append({"project_id": p_id, "screen_id": win["screen_id"], "html": win["html"], "img": win["images"][0], "img_path": seed_rel_path, "index": i, "brief": brief})
+                        except Exception as e:
+                            logger.error(f"Failed to generate reroll seed {i+1}: {e}")
+                    
+                    base_variants = [r for r in results if r is not None]
+                    if not base_variants: raise Exception("Reroll failed to generate any base seeds.")
+                    design_retry_count += 1
+                    continue # Start the voting process again with the new seeds
+                
+                best_base_idx = max(0, min(len(base_variants)-1, best_base_idx_raw - 1))
+                break # Found a winner or reached max retries
+            except Exception as e:
+                logger.warning(f"Vision critique failed: {e}. Falling back to first seed.")
+                self.current_iteration_record.seed_review_critique = f"Vision critique failed: {e}."
+                best_base_idx = 0
+                break
+            
+        winning_seed = base_variants[best_base_idx]
+        self.state.stitch_project_id = winning_seed["project_id"]
+        screen_id = winning_seed["screen_id"]
+        
+        self._update_env_file("STITCH_PROJECT_ID", self.state.stitch_project_id)
+        
+        # Clear old design files
+        if os.path.exists("app/design"):
+            for f in os.listdir("app/design"):
+                if f.endswith(".html") or f.endswith(".png"):
+                    try: os.remove(os.path.join("app/design", f))
+                    except: pass
+        else:
+            os.makedirs("app/design", exist_ok=True)
+
+        with open(design_file, "w", encoding="utf-8") as f:
+            f.write(winning_seed["html"])
+        
+        if winning_seed.get("images"):
+            for img_idx, img_bytes in enumerate(winning_seed["images"]):
+                ref_name = "reference.png" if img_idx == 0 else f"reference_{img_idx}.png"
+                with open(os.path.join("app", "design", ref_name), "wb") as f:
+                    f.write(img_bytes)
+        
+        self.current_iteration_record.design_screenshot_path = self.current_iteration_record.base_seed_paths[winning_seed["index"]]
+        self.state.save()
+
+        # 3. SINGLE-CALL LAYOUT REFINEMENT (5 Variants in One Call)
+        logger.info("Generating 5 layout variants of the winning seed in a single call...")
+        self.state.current_status = "Phase 2: Refining layout variants (5-way parallel)..."
+        self.state.save()
+        
+        layout_variants = self.stitch.generate_variants(
+            prompt=f"Explore 5 divergent layout refinements for this winning hypothesis. Focus on maximizing the intentionality of the UX for: {active_task.description}.",
+            project_id=self.state.stitch_project_id,
+            screen_id=screen_id,
+            count=5,
+            creative_range="EXPLORE",
+            aspects=["LAYOUT"]
+        )
+        
+        if layout_variants:
+            self.current_iteration_record.design_variants_paths = []
+            valid_layouts = []
+            ts = int(time.time())
+            for idx, var in enumerate(layout_variants):
+                if not var.get("images"): continue
+                # Capture all images for variant, pick first for primary path
+                primary_path = None
+                for img_idx, img_bytes in enumerate(var["images"]):
+                    var_dest = f"viewer/public/artifacts/iter_{self.state.current_iteration}_layout_{idx+1}_{img_idx}_{ts}.png"
+                    with open(var_dest, "wb") as f: f.write(img_bytes)
+                    if img_idx == 0: primary_path = f"artifacts/iter_{self.state.current_iteration}_layout_{idx+1}_{img_idx}_{ts}.png"
+                
+                self.current_iteration_record.design_variants_paths.append(primary_path)
+                valid_layouts.append(var)
+            
+            if valid_layouts:
+                try:
+                    baseline_path = f"viewer/public/{self.current_iteration_record.design_screenshot_path}"
+                    best_l_idx, review_text = self.vision.review_layouts(
+                        inspiration_goal=active_task.description,
+                        valid_layouts=valid_layouts,
+                        baseline_img_path=baseline_path
+                    )
+                    self.current_iteration_record.layout_review_critique = review_text
+                    best_l_idx = best_l_idx - 1 # Convert 1-based index to 0-based index
+                except Exception as e:
+                    logger.warning(f"Vision layout critique failed: {e}. Defaulting to baseline.")
+                    self.current_iteration_record.layout_review_critique = f"Vision layout critique failed: {e}. Defaulted to baseline."
+                    best_l_idx = 0 # Treat as baseline
+                
+                if best_l_idx == 0:
+                    logger.info("Overseer chose to stick with the original Base Seed layout.")
+                    self.current_iteration_record.chosen_design_path = self.current_iteration_record.design_screenshot_path
+                else:
+                    var_idx = best_l_idx - 1
+                    screen_id = valid_layouts[var_idx]["screen_id"]
+                    winning_layout = valid_layouts[var_idx]
+                    self.current_iteration_record.chosen_design_path = self.current_iteration_record.design_variants_paths[var_idx]
+                    
+                    # Clear old design files
+                    if os.path.exists("app/design"):
+                        for f in os.listdir("app/design"):
+                            if f.endswith(".html") or f.endswith(".png"):
+                                try: os.remove(os.path.join("app/design", f))
+                                except: pass
+                    else:
+                        os.makedirs("app/design", exist_ok=True)
+                            
+                    design_file = os.path.abspath("app/design/latest_design.html")
+                    if winning_layout.get("html_content"):
+                        with open(design_file, "w", encoding="utf-8") as f: f.write(winning_layout["html_content"])
+                    if winning_layout.get("images"):
+                        for img_idx, img_bytes in enumerate(winning_layout["images"]):
+                            ref_name = "reference.png" if img_idx == 0 else f"reference_{img_idx}.png"
+                            with open(os.path.join("app", "design", ref_name), "wb") as f: f.write(img_bytes)
+            self.state.save()
+
+        # 4. SINGLE-CALL THEME PASS (5 Variants)
+        # Always run theme exploration for Iteration 1 to establish the brand
+        if self.state.current_iteration == 1:
+            self._run_theme_pass(screen_id, count=5)
+        else:
+            logger.info("Applying existing App Meta theme to new layout...")
+            screens = self.stitch.generate_or_edit_screen(
+                description=f"Apply this existing visual identity strictly: {self.state.app_meta}. Maintain the current layout exactly.",
+                project_id=self.state.stitch_project_id,
+                screen_id=screen_id
+            )
+            if screens:
+                # Clear old design files to prevent stale references
+                if os.path.exists("app/design"):
+                    for f in os.listdir("app/design"):
+                        if f.endswith(".html") or f.endswith(".png"):
+                            try: os.remove(os.path.join("app/design", f))
+                            except: pass
+                else:
+                    os.makedirs("app/design", exist_ok=True)
+
+                for i, win in enumerate(screens):
+                    design_name = "latest_design.html" if i == 0 else f"latest_design_{i}.html"
+                    design_file = os.path.abspath(f"app/design/{design_name}")
+                    with open(design_file, "w", encoding="utf-8") as f:
+                        f.write(win["html"])
+                    
+                    for idx, img_bytes in enumerate(win["images"]):
+                        ref_name = "reference.png" if i == 0 and idx == 0 else f"reference_{i}_{idx}.png"
+                        with open(os.path.abspath(f"app/design/{ref_name}"), "wb") as f:
+                            f.write(img_bytes)
+                            
+                    if i == 0:
+                        screen_id = win["screen_id"]
+
+        self.state.stitch_screen_id = screen_id
+        self.state.save()
+        self.git.commit(f"design: unconstrained 5-5-5 discovery for iter {self.state.current_iteration}")
+
+    def _run_theme_pass(self, screen_id, count=5):
+        logger.info(f"Conducting Theme Pass with {count} variants...")
+        self.state.current_status = f"Phase 3: Exploring {count} color and typography themes..."
+        self.state.save()
+        
+        theme_variants = self.stitch.generate_variants(
+            prompt=f"Explore {count} completely distinct color palettes, dark/light modes, and typography combinations for this layout. The goal is a high-intentionality feel for: {active_task.description}. Do not change the layout structure.",
+            project_id=self.state.stitch_project_id,
+            screen_id=screen_id,
+            count=count,
+            creative_range="EXPLORE",
+            aspects=["COLOR_SCHEME", "TEXT_FONT"]
+        )
+        
+        if theme_variants:
+            self.current_iteration_record.theme_variants_paths = []
+            valid_themes = []
+            t_ts = int(time.time())
+            for idx, var in enumerate(theme_variants):
+                if not var.get("images"): continue
+                primary_path = None
+                for img_idx, img_bytes in enumerate(var["images"]):
+                    var_dest = f"viewer/public/artifacts/iter_{self.state.current_iteration}_theme_{idx+1}_{img_idx}_{t_ts}.png"
+                    with open(var_dest, "wb") as f: f.write(img_bytes)
+                    if img_idx == 0: primary_path = f"artifacts/iter_{self.state.current_iteration}_theme_{idx+1}_{img_idx}_{t_ts}.png"
+                
+                self.current_iteration_record.theme_variants_paths.append(primary_path)
+                valid_themes.append(var)
+            
+            if valid_themes:
+                try:
+                    baseline_path = os.path.abspath("app/design/reference.png")
+                    best_t_idx, review_text, app_meta = self.vision.review_themes(
+                        inspiration_goal=active_task.description,
+                        valid_themes=valid_themes,
+                        baseline_img_path=baseline_path
+                    )
+                    self.current_iteration_record.theme_review_critique = review_text
+                    
+                    if app_meta:
+                        self.state.app_meta = app_meta
+                        with open("app/APP_META.md", "w", encoding="utf-8") as f: 
+                            f.write(self.state.app_meta)
+                    
+                    best_t_idx = best_t_idx - 1 # Convert 1-based index to 0-based array index
+                except Exception as e:
+                    logger.warning(f"Vision theme critique failed: {e}. Defaulting to baseline.")
+                    self.current_iteration_record.theme_review_critique = f"Vision theme critique failed: {e}. Defaulted to baseline."
+                    best_t_idx = 0 # Treat as baseline
+                
+                if best_t_idx == 0:
+                    logger.info("Overseer chose to stick with the baseline theme.")
+                else:
+                    var_idx = best_t_idx - 1
+                    chosen_t = valid_themes[var_idx]
+                    self.current_iteration_record.chosen_theme_path = self.current_iteration_record.theme_variants_paths[var_idx]
+                    
+                    # Clear old design files
+                    if os.path.exists("app/design"):
+                        for f in os.listdir("app/design"):
+                            if f.endswith(".html") or f.endswith(".png"):
+                                try: os.remove(os.path.join("app/design", f))
+                                except: pass
+                    else:
+                        os.makedirs("app/design", exist_ok=True)
+                            
+                    design_file = os.path.abspath("app/design/latest_design.html")
+                    if chosen_t.get("html_content"):
+                        with open(design_file, "w", encoding="utf-8") as f: f.write(chosen_t["html_content"])
+                    if chosen_t.get("images"):
+                        for img_idx, img_bytes in enumerate(chosen_t["images"]):
+                            ref_name = "reference.png" if img_idx == 0 else f"reference_{img_idx}.png"
+                            with open(os.path.join("app", "design", ref_name), "wb") as f: f.write(img_bytes)
+            self.state.save()
+
+    def _step_implementation(self, branch_name, active_task: BacklogTask) -> str:
+        self.state.current_phase = LoomPhase.IMPLEMENTATION.value
+
+        # Ensure we are on the correct agentic branch for this iteration
+        self.git.checkout_branch(branch_name)
+
+        # 1. Autonomous Database Provisioning (The Data Soul)
+        # ... PB code ...
+        if active_task.data_model:
+            # (Rest of PB provisioning remains the same)
+            logger.info("Overseer is provisioning PocketBase schema...")
+            self.state.current_status = "Provisioning database schema..."
+            self.state.save()
+            
+            try:
+                from loom.environment.pocketbase import DatabaseProvisioner
+                provisioner = DatabaseProvisioner(pb_url=self.pb_url)
+                
+                # Ask LLM to translate plain text data model to PocketBase JSON Schema
+                schema_prompt = f"""
+Convert the following data model description into a JSON array of PocketBase collection definitions.
+Data Model: {active_task.data_model}
+
+Rules:
+1. Each object in the array must represent a collection.
+2. Required fields for each collection: "name" (string), "type" ("base" or "auth"), "schema" (array of field definition objects).
+3. Valid field types: "text", "number", "bool", "email", "url", "date", "select", "json", "file", "relation".
+4. Set "listRule", "viewRule", "createRule", "updateRule", "deleteRule" to "" (empty string = public access) for easy prototyping.
+5. Return ONLY valid JSON, no markdown blocks.
+
+Example output:
+[
+  {{
+    "name": "posts",
+    "type": "base",
+    "schema": [
+      {{"name": "title", "type": "text", "required": true}},
+      {{"name": "views", "type": "number", "required": false}}
+    ],
+    "listRule": "", "viewRule": "", "createRule": "", "updateRule": "", "deleteRule": ""
+  }}
+]
+"""
+                schema_json_str = self._generate_content_with_retry(self.model, schema_prompt).text.strip()
+                # Clean markdown if present
+                schema_json_str = schema_json_str.replace("```json", "").replace("```", "").strip()
+                
+                import json
+                schema_json = json.loads(schema_json_str)
+                
+                success = provisioner.provision_schema(schema_json)
+                if success:
+                    logger.info("Successfully provisioned PocketBase schema.")
+                else:
+                    logger.warning("Failed to provision some or all PocketBase collections.")
+            except Exception as e:
+                logger.error(f"Failed to provision database: {e}")
+
+        max_attempts = 50
+        current_attempt = len(self.current_iteration_record.attempts) + 1
+        
+        while current_attempt <= max_attempts:
+            logger.info(f"--- Attempt {current_attempt}/{max_attempts} for Iteration {self.state.current_iteration} ---")
+            self.state.current_status = f"Jules is coding (Attempt {current_attempt})..."
+            self.state.save()
+            
+            # We stay on the same branch (branch_name) for all attempts in this iteration
+            # but we push before calling Jules so it sees our latest (or its latest) work.
+            self.git.push_branch(branch_name)
+
+            task_prompt = self._get_jules_prompt(current_attempt, active_task)
+            owner, repo_name = self._get_repo_info()
+            self.state.active_jules_prompt = task_prompt
+            self.state.save()
+
+            try:
+                self.jules.run_task(task_prompt, owner, repo_name, branch_name, 
+                                   activity_callback=lambda act, url: self._update_jules_state(act, url))
+                self.git.commit(f"feat: implementation attempt {current_attempt}")
+                self.git.push_branch(branch_name)
+            except Exception as e:
+                logger.error(f"Build failed: {e}")
+            finally:
+                self.state.active_jules_prompt = None
+                self.state.save()
+            
+            self._save_patch_artifact(current_attempt)
+            self._evaluate_iteration(current_attempt, branch_name, active_task)
+            
+            if self.happiness_score >= 8: 
+                self.current_iteration_record.successful_branch = branch_name
+                self.state.save()
+                break
+            current_attempt += 1
+
+        return self.current_iteration_record.successful_branch or branch_name
+
+    def _get_jules_prompt(self, attempt, active_task: BacklogTask):
+        memory_context = ""
+        if self.state.repo_memory.get("learnings"):
+            memory_context = "\nPast Learnings:\n"
+            for l in self.state.repo_memory["learnings"][-3:]:
+                status = "Success" if l['success'] else "Failure"
+                memory_context += f"- Iteration {l['iteration']} ({status}): {l['takeaways']}\n"
+
+        if attempt == 1:
+            data_model_context = f"\nData Model (PocketBase Schema):\n{active_task.data_model}\n" if active_task.data_model else ""
+            
+            if active_task.type == "feature" and active_task.requires_design:
+                return f"""
+Implement the design for '{active_task.description}'.
+App Identity: {self.state.app_meta}
+Target Route: {active_task.target_route}
+{data_model_context}
+{memory_context}
+
+The design files are in app/design. 
+CRITICAL RULES:
+1. Integrate this new feature into the existing application natively using the established design system (Tailwind classes, layout, components).
+2. The target flow/location is: '{active_task.target_route}'. If this requires a new page, set up React Router without breaking existing pages AND add a visible link to it in the main app navigation so the user can reach it. If it is a modal/overlay, integrate it cleanly into the current view.
+3. If a Data Model is provided above, you MUST use the `pocketbase` npm package to make the application state persistent. Assume the PocketBase server is running on port 8090 of the same host as the application. Initialize the client using `new PocketBase(window.location.protocol + "//" + window.location.hostname + ":8090")`. Provide a clean API or hook for the UI to interact with.
+4. All new UI states, overlays, drawers, or modals MUST be deep-linkable and controllable via URL search parameters (e.g., `/?view=settings` or `/?modal=library`).
+5. You MUST append a new Playwright integration test block (`test('...', async ({{ page }}) => {{...}})`) to `app/tests/verify.spec.ts` that implements this exact verification scenario: "{active_task.test_scenario}". Do NOT delete existing tests.
+6. CRITICAL: At the end of your newly added test (after the assertions pass), you MUST take a screenshot of the active feature using `await page.screenshot({{ path: 'evidence.png' }});`. This image is required to prove the feature works visually.
+"""
+            elif active_task.type == "refactor" and active_task.requires_design:
+                return f"""
+Refine the UI/UX implementation of '{active_task.description}'.
+App Identity: {self.state.app_meta}
+Target Route: {active_task.target_route}
+{data_model_context}
+{memory_context}
+
+The primary design is LOCKED. Do NOT expect new design assets. Your task is to refine the existing CSS, layout, and logic to better match the current files in `app/design` and fix any UX papercuts or discrepancies mentioned in the description.
+
+CRITICAL RULES:
+1. Focus on visual and functional refinement of the existing '{active_task.target_route}' route.
+2. If a Data Model is provided, ensure the PocketBase persistence logic is robust and correctly reflects the schema.
+3. You MUST update the Playwright integration test in `app/tests/verify.spec.ts` to ensure it continues to pass with these refinements.
+4. CRITICAL: At the end of the test, you MUST take a screenshot of the active feature using `await page.screenshot({{ path: 'evidence.png' }});`.
+"""
+            elif active_task.type == "bugfix":
+                return f"""
+Fix the following bug/failing test: '{active_task.description}'.
+App Identity: {self.state.app_meta}
+Target Route: {active_task.target_route}
+{data_model_context}
+{memory_context}
+
+Context/Error:
+{active_task.context}
+
+CRITICAL RULES:
+1. This is a BUGFIX. Do NOT add new features. Focus entirely on resolving the specific error or test failure provided in the context.
+2. Ensure the Playwright tests in `app/tests/verify.spec.ts` pass after your fix.
+3. CRITICAL: At the end of the test, you MUST take a screenshot using `await page.screenshot({{ path: 'evidence.png' }});`.
+"""
+            else:
+                return f"""
+Implement the following architectural/logic task: '{active_task.description}'.
+App Identity: {self.state.app_meta}
+Target Route: {active_task.target_route}
+{data_model_context}
+{memory_context}
+
+Task Context:
+{active_task.context}
+
+CRITICAL RULES:
+1. This is a LOGIC / ARCHITECTURE update. Do NOT significantly alter the visual design, CSS, or layout unless required to fix a bug.
+2. Focus purely on the underlying React logic, state management, or architecture as requested.
+3. If a Data Model is provided, you MUST implement the corresponding persistence logic using the `pocketbase` SDK connecting to port 8090 of the current host (`window.location.hostname`).
+4. You MUST append or update a Playwright integration test block to `app/tests/verify.spec.ts` that implements this exact verification scenario: "{active_task.test_scenario}". Do NOT delete existing tests.
+5. CRITICAL: At the end of your test (after the assertions pass), you MUST take a screenshot of the active feature using `await page.screenshot({{ path: 'evidence.png' }});`."""
+        else:
+            past_critiques = ""
+            if self.current_iteration_record and self.current_iteration_record.attempts:     
+                last_att = self.current_iteration_record.attempts[-1]
+                past_critiques += f"\nPrevious Attempt {last_att.attempt_number} (Score: {last_att.score}/10) Critique:\n{last_att.critique}\n"
+            
+            data_model_context = f"\nData Model (PocketBase Schema):\n{active_task.data_model}\n" if active_task.data_model else ""
+            return f"""Refine the implementation. 
+
+CRITICAL CONTEXT: 
+The code currently in the repository IS the result of the previous attempt ({attempt-1}). 
+You are NOT starting from scratch. You must BUILD ON and FIX the existing code based on the feedback below.
+
+Meta: {self.state.app_meta}. 
+Route: {active_task.target_route}. 
+{data_model_context}
+{memory_context}
+
+CRITICAL RULES:
+1. You MUST include or update the Playwright test in `app/tests/verify.spec.ts`.
+2. Review the following feedback/errors from the previous attempt. If a Playwright test failed, fix the React code or the test script to resolve the error.
+
+Feedback:
+{past_critiques}
+"""
+
+    def _update_jules_state(self, action, url):
+        self.state.active_jules_action = action
+        self.state.active_jules_url = url
+        self.state.save()
+
+    def _save_patch_artifact(self, attempt):
+        patch_src = "app/jules.patch"
+        self.patch_dest_rel = None
+        if os.path.exists(patch_src):
+            ts = int(time.time())
+            patch_dest = f"viewer/public/artifacts/iter_{self.state.current_iteration}_att_{attempt}_{ts}.patch"
+            shutil.copy(patch_src, patch_dest)
+            self.patch_dest_rel = f"artifacts/iter_{self.state.current_iteration}_att_{attempt}_{ts}.patch"
+
+    def _evaluate_iteration(self, attempt, branch, active_task: BacklogTask):
+        self.state.current_phase = LoomPhase.VALIDATION.value
+        logger.info(f"[bold cyan]Evaluating Attempt {attempt}...[/bold cyan]", extra={"markup": True})
+        self.state.current_status = f"Evaluating (Attempt {attempt})..."
+        self.state.save()
+        
+        # Reset score/critique for this attempt
+        self.happiness_score = 0
+        self.last_critique = ""
+        self.app_screenshot = None
+        self.app_screenshot_path = None
+
+        try:
+            # Build check
+            build_success, build_error = self._run_build()
+            if not build_success:
+                logger.error(f"Build failed for attempt {attempt}: {build_error}")
+                self.happiness_score, self.last_critique = 0, f"Build error: {build_error}"
+            else:
+                logger.info("Build successful.")
+                # Test check
+                test_success, test_error = self._run_tests(attempt)
+                if not test_success:
+                    logger.error(f"Tests failed for attempt {attempt}: {test_error}")
+                    self.happiness_score, self.last_critique = 0, f"Test error: {test_error}"
+                    
+                    # Generate a P0 Bugfix task if not already in a bugfix
+                    if active_task.type != "bugfix":
+                        import uuid
+                        from loom.core.state import TaskPriority, TaskType
+                        bugfix_task = BacklogTask(
+                            id=f"BUGFIX-{uuid.uuid4().hex[:6].upper()}",
+                            type=TaskType.BUGFIX,
+                            priority=TaskPriority.P0_CRITICAL,
+                            description=f"Fix failing Playwright test: {active_task.test_scenario}",
+                            target_route=active_task.target_route,
+                            requires_design=False,
+                            context=f"The test failed during execution.\nError Output:\n{test_error}"
+                        )
+                        logger.warning(f"Sentry identified a broken build. Pushing P0 BUGFIX to backlog.")
+                        self.state.backlog.insert(0, bugfix_task)
+                        self.state.save()
+                else:
+                    logger.info("Tests passed.")
+                    # Vision check
+                    if active_task.requires_design:
+                        self.happiness_score, self.last_critique, self.app_screenshot = self.evaluate_happiness(target_route=active_task.target_route)
+                    else:
+                        self.happiness_score, self.last_critique = 10, "Logic update successful."
+                    
+                    # Arch check
+                    if self.happiness_score >= 8:
+                        arch_score, arch_critique, priorities = self.evaluate_architecture(branch)
+                        if arch_score < 8:
+                            self.happiness_score, self.last_critique = arch_score, f"Visuals good, arch bad: {arch_critique}"
+                        
+                        # Handle new technical debt tasks
+                        if priorities:
+                            import uuid
+                            from loom.core.state import TaskPriority, TaskType
+                            for p in priorities:
+                                # Map int 0,1,2 to TaskPriority
+                                p_int = p.get('priority', 1)
+                                if p_int == 0:
+                                    t_prio = TaskPriority.P0_CRITICAL
+                                elif p_int == 2:
+                                    t_prio = TaskPriority.P2_NORMAL
+                                else:
+                                    t_prio = TaskPriority.P1_HIGH
+                                    
+                                new_refactor = BacklogTask(
+                                    id=f"REFACTOR-{uuid.uuid4().hex[:6].upper()}",
+                                    type=TaskType.REFACTOR,
+                                    priority=t_prio,
+                                    description=p.get('description', 'Refactor task'),
+                                    target_route=active_task.target_route,
+                                    requires_design=False,
+                                    context=arch_critique
+                                )
+                                logger.warning(f"Architect identified technical debt: {new_refactor.description} (Priority {t_prio})")
+                                self.state.backlog.append(new_refactor)
+                            self.state.save()
+        except Exception as e:
+            logger.error(f"Evaluation crashed: {e}")
+            self.happiness_score, self.last_critique = 0, f"Evaluation error: {str(e)}"
+
+        # ALWAYS Record attempt
+        self._record_attempt(attempt, active_task)
+
+    def _run_build(self):
+        try:
+            subprocess.run(["npm", "install", "--no-audit", "--no-fund"], cwd="app", check=True, capture_output=True, text=True, shell=(os.name == 'nt'))
+            subprocess.run(["npm", "run", "build"], cwd="app", check=True, capture_output=True, text=True, shell=(os.name == 'nt'))
+            return True, ""
+        except subprocess.CalledProcessError as e: return False, e.stderr or e.stdout
+        except Exception as e: return False, str(e)
+
+    def _run_tests(self, attempt):
+        self.phoenix.spawn()
+        self.phoenix.wait_for_ready()
+        try:
+            # Install playwright browsers if not present
+            subprocess.run(["npx", "playwright", "install", "chromium"], cwd="app", check=True, capture_output=True, text=True, shell=(os.name == 'nt'))
+            result = subprocess.run(["npx", "playwright", "test"], cwd="app", capture_output=True, text=True, shell=(os.name == 'nt'))
+            
+            # Check for Evidence
+            if os.path.exists("app/evidence.png"):
+                ts = int(time.time())
+                evidence_path = f"viewer/public/artifacts/iter_{self.state.current_iteration}_attempt_{attempt}_evidence_{ts}.png"
+                shutil.move("app/evidence.png", evidence_path)
+                # Store relative path for UI
+                self.app_screenshot_path = f"artifacts/iter_{self.state.current_iteration}_attempt_{attempt}_evidence_{ts}.png"
+                logger.info(f"Evidence captured: {evidence_path}")
+            
+            return result.returncode == 0, result.stderr or result.stdout
+        except Exception as e:
+            return False, str(e)
+        finally:
+            self.phoenix.kill()
+
+    def _record_attempt(self, attempt, active_task: BacklogTask):
+        app_screenshot_path = None
+        if self.app_screenshot:
+            ts = int(time.time())
+            app_screenshot_path = f"artifacts/iter_{self.state.current_iteration}_attempt_{attempt}_app_{ts}.png"
+            with open(f"viewer/public/{app_screenshot_path}", "wb") as f:
+                f.write(self.app_screenshot)
+        
+        attempt_record = AttemptRecord(
+            attempt_number=attempt,
+            prompt_used=self._get_jules_prompt(attempt, active_task),
+            app_screenshot_path=app_screenshot_path,
+            jules_patch_path=self.patch_dest_rel,
+            jules_url=self.state.active_jules_url,
+            jules_action="COMPLETED",
+            score=self.happiness_score,
+            critique=self.last_critique
+        )
+        self.current_iteration_record.attempts.append(attempt_record)
+        self.current_iteration_record.happiness_score = self.happiness_score
+        self.state.save()
+
+    def _step_reflection(self, active_task: BacklogTask):
+        self.state.current_phase = LoomPhase.REFLECTION.value
+        logger.info("Conducting Reflection Pass...")
+        self.state.current_status = "Reflecting on iteration..."
+        self.state.save()
+        
+        learnings = self.reflection.reflect_on_task(
+            active_task=active_task,
+            happiness_score=self.happiness_score,
+            last_critique=self.last_critique,
+            app_meta=self.state.app_meta
+        )
+        logger.info(f"Learnings:\n{learnings}")
+        
+        if "learnings" not in self.state.repo_memory:
+            self.state.repo_memory["learnings"] = []
+            
+        # Deduplication check: remove previous reflection for the same iteration to prevent bloat
+        self.state.repo_memory["learnings"] = [
+            l for l in self.state.repo_memory["learnings"] 
+            if l.get("iteration") != self.state.current_iteration
+        ]
+        
+        self.state.repo_memory["learnings"].append({
+            "iteration": self.state.current_iteration,
+            "goal": active_task.description,
+            "success": self.happiness_score >= 8,
+            "takeaways": learnings
+        })
+        self.state.save()
+
+    def _step_decision(self, branch, active_task: BacklogTask):
+        self.state.current_phase = LoomPhase.DECISION.value
+        if self.happiness_score >= 8:
+            logger.info(f"Happiness achieved on branch {branch}! Merging to main.")
+            self.git.checkout_branch("main")
+            try:
+                self.git._run(["git", "merge", "-X", "theirs", branch], cwd="app")
+                self.git.push_branch("main")
+                
+                self.state.current_status = "Merge successful. Preparing for next loop..."
+                
+                # Clear the active task so the next loop triggers triage again
+                self.state.active_task_id = None
+                
+                self.state.save()
+            except Exception as e:
+                logger.error(f"Merge to main failed: {e}. Resetting main.")
+                self.git._run(["git", "reset", "--hard", "origin/main"], cwd="app")
+        else:
+            logger.info("Max attempts reached or happiness not met. Abandoning iteration.")
+            if self.current_iteration_record:
+                self.current_iteration_record.abandoned = True
+            self.git.checkout_branch("main")
+            self.git._run(["git", "reset", "--hard", "origin/main"], cwd="app")
+            self.git._run(["git", "clean", "-fd"], cwd="app")
+            
+            # If we don't have any previous successful iterations, the genesis project failed.
+            # We must wipe the design identity so the next loop starts a fresh genesis project.
+            if not any(h.happiness_score >= 8 for h in self.state.history[:-1]):
+                logger.warning("Genesis project failed. Resetting design state to restart 5-5-5 genesis.")
+                self.state.stitch_project_id = None
+                self.state.stitch_screen_id = None
+                self.state.app_meta = ""
+                self.state.product_phase = "Phase 1: Core Loop MVP"
+                self.state.product_roadmap = ""
+                if os.path.exists("app/APP_META.md"):
+                    try: os.remove("app/APP_META.md")
+                    except: pass
+            
+            # Clear active task on failure as well, let triage pick up a new one (e.g. bugfix)
+            self.state.active_task_id = None
+            self.state.save()
