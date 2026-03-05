@@ -1,289 +1,319 @@
 <!DOCTYPE html>
-<html class="dark"><head>
+<html class="dark" lang="en"><head>
 <meta charset="utf-8"/>
-<title>Warp: Minimalist Monochrome Edition</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Advoloom Community Queue View</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&amp;display=swap" rel="stylesheet"/>
 <script id="tailwind-config">
-    tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            "primary": "#ff4d00","background-light": "#ffffff",
-            "background-dark": "#0a0a0a",
-            "surface": "#121212",
-            "surface-light": "#262626",
-            "border-color": "#404040",
-            "text-main": "#ffffff",
-            "text-muted": "#a3a3a3",
-            "tag-q": "#ffffff",
-            "tag-b": "#e5e5e5",
-            "tag-i": "#d4d4d4"
-          },
-          fontFamily: {
-            "display": ["Archivo", "sans-serif"],
-            "mono": ["monospace"]
-          },
-          borderRadius: {"DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px"},
-          boxShadow: {
-            'sharp': '4px 4px 0px 0px rgba(255, 255, 255, 0.1)',
-            'sharp-primary': '4px 4px 0px 0px rgba(255, 77, 0, 0.4)',
-          }
-        },
-      },
-    }
-  </script>
-<style>
-    body { font-family: 'Archivo', sans-serif; }.pattern-dots {
-        background-image: radial-gradient(#666 1px, transparent 1px);
-        background-size: 4px 4px;
-    }
-    .pattern-lines {
-        background: repeating-linear-gradient(
-          45deg,
-          transparent,
-          transparent 2px,
-          #333 2px,
-          #333 4px
-        );
-    }
-    .pattern-grid {
-        background-image: linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px);
-        background-size: 8px 8px;
-    }
-  </style>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#256af4",
+                        "accent": "#00f2ff", // Neon Cyan
+                        "obsidian": "#050608",
+                        "background-dark": "#0a0c10",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        .glass-panel {
+            background: rgba(10, 12, 16, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 242, 255, 0.1);
+        }
+        .terminal-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+            background: #00f2ff33;
+        }
+        .queue-row:hover {
+            background: rgba(0, 242, 255, 0.03);
+        }
+    </style>
 </head>
-<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-text-main font-display min-h-screen flex flex-col overflow-hidden selection:bg-primary selection:text-white">
-<header class="flex items-center justify-between border-b-2 border-white px-6 py-4 shrink-0 bg-background-dark z-10">
-<div class="flex items-center gap-4 text-white">
-<div class="size-8 bg-white text-black flex items-center justify-center font-black text-xl">
-        W
-      </div>
-<h2 class="text-xl font-black uppercase tracking-widest">Warp Logger</h2>
+<body class="bg-obsidian text-slate-100 font-mono selection:bg-accent/30 selection:text-accent">
+<div class="flex h-screen overflow-hidden">
+<aside class="w-16 flex flex-col items-center py-6 border-r border-accent/10 bg-obsidian z-20">
+<div class="mb-10 text-accent">
+<span class="material-symbols-outlined text-3xl">terminal</span>
 </div>
-<div class="flex flex-1 justify-end gap-8 items-center">
-<nav class="flex items-center gap-8 hidden md:flex uppercase tracking-widest text-xs font-bold">
-<a class="text-text-muted hover:text-white transition-colors hover:underline decoration-2 underline-offset-4" href="#">Dashboard</a>
-<a class="text-white border-b-2 border-primary pb-1" href="#">Logger</a>
-<a class="text-text-muted hover:text-white transition-colors hover:underline decoration-2 underline-offset-4" href="#">Projects</a>
+<nav class="flex flex-col gap-8 flex-1">
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="absolute left-14 hidden group-hover:block bg-obsidian border border-accent/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Home</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg bg-accent/10 text-accent" href="#">
+<span class="material-symbols-outlined">forum</span>
+<span class="absolute left-14 hidden group-hover:block bg-obsidian border border-accent/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Community</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">smart_toy</span>
+<span class="absolute left-14 hidden group-hover:block bg-obsidian border border-accent/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Agents</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">article</span>
+<span class="absolute left-14 hidden group-hover:block bg-obsidian border border-accent/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Content</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="absolute left-14 hidden group-hover:block bg-obsidian border border-accent/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Analytics</span>
+</a>
 </nav>
-<button class="flex items-center justify-center h-10 px-6 bg-white text-black text-xs font-black uppercase tracking-wider hover:bg-primary hover:text-white transition-colors gap-2 border border-white">
-<span class="material-symbols-outlined text-sm">download</span>
-<span>Export CSV</span>
+<div class="flex flex-col gap-6">
+<button class="text-slate-400 hover:text-accent transition-colors">
+<span class="material-symbols-outlined">settings</span>
 </button>
-<div class="size-10 bg-surface-light flex items-center justify-center text-white text-xs font-bold border border-border-color">
-        JD
-      </div>
+<div class="size-8 rounded-full bg-accent/20 border border-accent/40 flex items-center justify-center text-[10px] font-bold text-accent">
+                AV
+            </div>
+</div>
+</aside>
+<main class="flex-1 flex flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_0%,_rgba(0,242,255,0.03)_0%,_transparent_50%)]">
+<header class="h-14 border-b border-accent/10 flex items-center justify-between px-6 bg-obsidian/50 backdrop-blur-md">
+<div class="flex items-center gap-4">
+<span class="text-accent text-xs font-mono tracking-widest uppercase">Community::Queue_Manager</span>
+<div class="h-4 w-px bg-accent/20"></div>
+<div class="flex items-center gap-2 text-xs font-mono">
+<span class="text-slate-400">PENDING_APPROVAL:</span>
+<span class="text-accent font-bold">24</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2 text-slate-400 text-sm font-mono bg-accent/5 px-3 py-1 rounded border border-accent/10">
+<span class="material-symbols-outlined text-sm">search</span>
+<span class="text-xs">FILTER: ALL_PLATFORMS</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-slate-400 hover:text-accent">refresh</button>
+<div class="h-6 w-px bg-accent/20"></div>
+<div class="flex items-center gap-2">
+<span class="size-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+<span class="text-[10px] uppercase text-green-500">Live_Sync</span>
+</div>
+</div>
 </div>
 </header>
-<main class="flex-1 flex flex-col md:flex-row overflow-hidden">
-<aside class="w-full md:w-72 border-r border-border-color bg-background-dark flex flex-col shrink-0 overflow-y-auto">
-<div class="p-6 border-b border-border-color">
-<h3 class="text-xs font-black uppercase tracking-widest text-white mb-6 flex items-center gap-2">
-<span class="material-symbols-outlined text-[18px]">local_offer</span>
-          Tag Schema
-        </h3>
-<div class="flex flex-col gap-4">
-<div class="flex items-center justify-between group cursor-pointer p-3 border border-border-color hover:border-white transition-colors bg-surface">
-<div class="flex items-center gap-4 w-full">
-<div class="flex items-center justify-center size-8 border-2 border-white bg-transparent text-white font-black text-sm">Q</div>
-<div class="flex flex-col">
-<span class="text-sm font-bold text-white uppercase tracking-wide">Quote</span>
-<span class="text-[10px] text-text-muted">Solid Border</span>
+<div class="flex-1 p-6 flex flex-col gap-4 overflow-hidden">
+<div class="grid grid-cols-4 gap-4">
+<div class="glass-panel p-3 rounded flex flex-col border-l-2 border-l-accent">
+<span class="text-[10px] text-slate-500 uppercase">Avg Response Time</span>
+<span class="text-lg font-bold">4.2m</span>
+</div>
+<div class="glass-panel p-3 rounded flex flex-col border-l-2 border-l-green-500">
+<span class="text-[10px] text-slate-500 uppercase">Sentiment Score</span>
+<span class="text-lg font-bold text-green-400">88% POS</span>
+</div>
+<div class="glass-panel p-3 rounded flex flex-col border-l-2 border-l-orange-500">
+<span class="text-[10px] text-slate-500 uppercase">Tech Support Needs</span>
+<span class="text-lg font-bold text-orange-400">12 HIGH</span>
+</div>
+<div class="glass-panel p-3 rounded flex flex-col border-l-2 border-l-primary">
+<span class="text-[10px] text-slate-500 uppercase">Active Agent</span>
+<span class="text-lg font-bold text-primary">Llama-3-DevRel</span>
+</div>
+</div>
+<div class="flex-1 glass-panel rounded-lg overflow-hidden flex flex-col">
+<div class="grid grid-cols-12 gap-4 px-6 py-3 border-b border-accent/10 bg-accent/5 text-[10px] uppercase tracking-widest font-bold text-slate-400">
+<div class="col-span-1">Platform</div>
+<div class="col-span-2">Developer</div>
+<div class="col-span-3">Inbound Query</div>
+<div class="col-span-4">Agent Draft</div>
+<div class="col-span-1 text-center">Sentiment</div>
+<div class="col-span-1 text-right">Action</div>
+</div>
+<div class="flex-1 overflow-y-auto terminal-scroll">
+<div class="grid grid-cols-12 gap-4 px-6 py-5 border-b border-accent/5 queue-row transition-all group items-start">
+<div class="col-span-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-accent text-lg">hub</span>
+<span class="text-[10px] text-slate-500">#gen</span>
+</div>
+<div class="col-span-2">
+<div class="text-xs font-bold text-accent">@sarah_codes</div>
+<div class="text-[10px] text-slate-500">id: 99283-ds</div>
+</div>
+<div class="col-span-3">
+<p class="text-xs leading-relaxed text-slate-300">"Having trouble initializing the SDK on Next.js 14. Getting a hydration error on the client component."</p>
+</div>
+<div class="col-span-4">
+<div class="bg-black/40 p-3 rounded border border-accent/10 group-hover:border-accent/30 transition-colors">
+<p class="text-xs leading-relaxed text-slate-400 italic">"For Next.js 14, ensure you're using the 'use client' directive at the top of your wrapper. The SDK requires browser APIs not available during SSR..."</p>
+<div class="mt-2 flex gap-2">
+<span class="text-[9px] text-accent/60 bg-accent/5 px-1 px-1 rounded border border-accent/10">LLAMA_3_70B</span>
 </div>
 </div>
 </div>
-<div class="flex items-center justify-between group cursor-pointer p-3 border border-border-color hover:border-white transition-colors bg-surface">
-<div class="flex items-center gap-4 w-full">
-<div class="flex items-center justify-center size-8 border-2 border-dashed border-white text-white font-black text-sm">B</div>
-<div class="flex flex-col">
-<span class="text-sm font-bold text-white uppercase tracking-wide">B-Roll</span>
-<span class="text-[10px] text-text-muted">Dashed Border</span>
+<div class="col-span-1 flex justify-center">
+<span class="size-3 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)] mt-1" title="Neutral / Help Needed"></span>
+</div>
+<div class="col-span-1 flex flex-col gap-2 items-end">
+<button class="bg-accent/10 hover:bg-accent text-accent hover:text-obsidian text-[10px] px-3 py-1 rounded border border-accent/20 font-bold transition-all">APPROVE</button>
+<button class="text-slate-500 hover:text-white text-[10px]">EDIT</button>
+</div>
+</div>
+<div class="grid grid-cols-12 gap-4 px-6 py-5 border-b border-accent/5 queue-row transition-all group items-start">
+<div class="col-span-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-accent text-lg">alternate_email</span>
+<span class="text-[10px] text-slate-500">X</span>
+</div>
+<div class="col-span-2">
+<div class="text-xs font-bold text-accent">@dev_guru</div>
+<div class="text-[10px] text-slate-500">id: x-229-aa</div>
+</div>
+<div class="col-span-3">
+<p class="text-xs leading-relaxed text-slate-300">"Loving the new @advoloom CLI! Spun up a full tutorial repo in 30 seconds. This is a game changer for DevRel."</p>
+</div>
+<div class="col-span-4">
+<div class="bg-black/40 p-3 rounded border border-accent/10 group-hover:border-accent/30 transition-colors">
+<p class="text-xs leading-relaxed text-slate-400 italic">"That's awesome to hear, @dev_guru! ð We're working on making the generation even faster. Let us know if you have any feature requests!"</p>
+</div>
+</div>
+<div class="col-span-1 flex justify-center">
+<span class="size-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)] mt-1" title="Positive"></span>
+</div>
+<div class="col-span-1 flex flex-col gap-2 items-end">
+<button class="bg-accent/10 hover:bg-accent text-accent hover:text-obsidian text-[10px] px-3 py-1 rounded border border-accent/20 font-bold transition-all">APPROVE</button>
+<button class="text-slate-500 hover:text-white text-[10px]">EDIT</button>
+</div>
+</div>
+<div class="grid grid-cols-12 gap-4 px-6 py-5 border-b border-accent/5 queue-row transition-all group items-start">
+<div class="col-span-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-accent text-lg">code</span>
+<span class="text-[10px] text-slate-500">ISSUE</span>
+</div>
+<div class="col-span-2">
+<div class="text-xs font-bold text-accent">octocat_user</div>
+<div class="text-[10px] text-slate-500">id: gh-pr-421</div>
+</div>
+<div class="col-span-3">
+<p class="text-xs leading-relaxed text-slate-300">"The Dockerfile is missing the production environment variables in the latest release build. See log output below..."</p>
+</div>
+<div class="col-span-4">
+<div class="bg-black/40 p-3 rounded border border-accent/10 group-hover:border-accent/30 transition-colors">
+<p class="text-xs leading-relaxed text-slate-400 italic">"Thanks for catching this! I've analyzed the build script and it looks like line 42 needs to be updated. Here's a suggested fix..."</p>
+</div>
+</div>
+<div class="col-span-1 flex justify-center">
+<span class="size-3 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)] mt-1" title="Issue / Bug"></span>
+</div>
+<div class="col-span-1 flex flex-col gap-2 items-end">
+<button class="bg-accent/10 hover:bg-accent text-accent hover:text-obsidian text-[10px] px-3 py-1 rounded border border-accent/20 font-bold transition-all">APPROVE</button>
+<button class="text-slate-500 hover:text-white text-[10px]">EDIT</button>
+</div>
+</div>
+<div class="grid grid-cols-12 gap-4 px-6 py-5 border-b border-accent/5 queue-row transition-all group items-start">
+<div class="col-span-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-accent text-lg">hub</span>
+<span class="text-[10px] text-slate-500">#help</span>
+</div>
+<div class="col-span-2">
+<div class="text-xs font-bold text-accent">@bobby_tables</div>
+<div class="text-[10px] text-slate-500">id: 99310-ds</div>
+</div>
+<div class="col-span-3">
+<p class="text-xs leading-relaxed text-slate-300">"Does Advoloom support self-hosting the vector database for custom context?"</p>
+</div>
+<div class="col-span-4">
+<div class="bg-black/40 p-3 rounded border border-accent/10 group-hover:border-accent/30 transition-colors">
+<p class="text-xs leading-relaxed text-slate-400 italic">"Yes, we support Pinecone, Weaviate, and Qdrant for self-hosting. You can configure this in the `advoloom.config.js` under the `storage` key."</p>
+</div>
+</div>
+<div class="col-span-1 flex justify-center">
+<span class="size-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)] mt-1" title="Positive Inquiry"></span>
+</div>
+<div class="col-span-1 flex flex-col gap-2 items-end">
+<button class="bg-accent/10 hover:bg-accent text-accent hover:text-obsidian text-[10px] px-3 py-1 rounded border border-accent/20 font-bold transition-all">APPROVE</button>
+<button class="text-slate-500 hover:text-white text-[10px]">EDIT</button>
 </div>
 </div>
 </div>
-<div class="flex items-center justify-between group cursor-pointer p-3 border border-border-color hover:border-white transition-colors bg-surface">
-<div class="flex items-center gap-4 w-full">
-<div class="flex items-center justify-center size-8 border-2 border-dotted border-white text-white font-black text-sm">I</div>
-<div class="flex flex-col">
-<span class="text-sm font-bold text-white uppercase tracking-wide">Insight</span>
-<span class="text-[10px] text-text-muted">Dotted Border</span>
+<div class="p-4 border-t border-accent/10 flex justify-between items-center bg-accent/5">
+<div class="flex gap-4">
+<button class="text-[10px] text-accent flex items-center gap-1"><span class="material-symbols-outlined text-xs">done_all</span> APPROVE ALL SHOWN</button>
+<button class="text-[10px] text-slate-400 flex items-center gap-1"><span class="material-symbols-outlined text-xs">download</span> EXPORT REPORT</button>
 </div>
-</div>
-</div>
-</div>
-</div>
-<div class="p-6 flex-1">
-<h3 class="text-xs font-black uppercase tracking-widest text-white mb-6 flex items-center gap-2">
-<span class="material-symbols-outlined text-[18px]">settings</span>
-          Quick Settings
-        </h3>
-<label class="flex items-center gap-4 py-3 cursor-pointer group border-b border-border-color">
-<div class="relative flex items-center">
-<input checked="" class="sr-only peer" type="checkbox"/>
-<div class="w-10 h-5 bg-surface-light border border-border-color peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-black after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-muted after:border-gray-300 after:border after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:after:bg-black peer-checked:border-primary"></div>
-</div>
-<span class="text-xs font-bold uppercase tracking-wide text-text-muted group-hover:text-white transition-colors">Auto-pause on tag</span>
-</label>
-<label class="flex items-center gap-4 py-3 cursor-pointer group border-b border-border-color">
-<div class="relative flex items-center">
-<input class="sr-only peer" type="checkbox"/>
-<div class="w-10 h-5 bg-surface-light border border-border-color peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-black after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-muted after:border-gray-300 after:border after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:after:bg-black peer-checked:border-primary"></div>
-</div>
-<span class="text-xs font-bold uppercase tracking-wide text-text-muted group-hover:text-white transition-colors">Snap to grid</span>
-</label>
-</div>
-</aside>
-<section class="flex-1 flex flex-col min-w-0 bg-background-dark overflow-hidden relative border-r border-border-color">
-<div class="flex-1 p-8 flex flex-col items-center justify-center min-h-[400px] bg-[#050505]">
-<div class="relative w-full max-w-5xl aspect-video bg-black border-2 border-white shadow-sharp group">
-<div class="absolute inset-0 bg-cover bg-center grayscale contrast-125" data-alt="Cinematic shot of a city street at dusk" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCDJiycr77lWOWeUijZRI6mEoDAa2ec2mp-YtLOSxZia2cQg1FrUPYiiBWTVa50nR9kQAQXnp0TmUekp0GcGmvyU1c2l6mc3AXTSVjIgGO3kuILUZ2SpJ7qRrIftlkoN7jJvqYAlOduIJfshrOysaOwGzranIoMkuoRM4OD1yyze8lchQwWsNGNS3xpLsPax_VNpnx6XsSOpSVhW7wOHZTQ5rJIrsupVp4u6X-UzfJtYfrYifHXrSEiFcICacaTsaVaa2ZNa69arkE');"></div>
-<div class="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors duration-300">
-<button class="flex items-center justify-center size-20 bg-primary text-black hover:bg-white hover:text-black transition-all border-2 border-black shadow-sharp">
-<span class="material-symbols-outlined text-5xl ml-1">play_arrow</span>
-</button>
-</div>
-<div class="absolute inset-x-0 bottom-0 bg-black pt-4 pb-4 px-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col gap-3 border-t-2 border-white">
-<div class="flex h-4 items-center w-full cursor-pointer bg-surface-light border border-white relative group/timeline">
-<div class="h-full w-[35%] bg-primary relative">
-<div class="absolute -right-2 top-1/2 -translate-y-1/2 size-4 bg-white border-2 border-black transform scale-0 group-hover/timeline:scale-100 transition-transform"></div>
-</div>
-</div>
-<div class="flex items-center justify-between text-white font-mono text-xs tracking-wider font-bold">
-<span class="bg-white text-black px-2 py-0.5">00:01:23:14</span>
-<div class="flex items-center gap-6">
-<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">volume_up</span></button>
-<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">settings</span></button>
-<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">fullscreen</span></button>
-</div>
-<span class="text-text-muted">00:04:12:20</span>
-</div>
-</div>
-</div>
-<div class="mt-8 flex items-center gap-4 bg-black px-8 py-3 border-2 border-white shadow-sharp">
-<button class="text-white hover:text-primary transition-colors" title="Jump Back 10s"><span class="material-symbols-outlined text-3xl">replay_10</span></button>
-<button class="text-white hover:text-primary transition-colors" title="Previous Marker"><span class="material-symbols-outlined text-3xl">skip_previous</span></button>
-<button class="flex items-center justify-center size-12 bg-white text-black hover:bg-primary hover:text-white transition-colors border-2 border-black" title="Play/Pause"><span class="material-symbols-outlined text-3xl">play_arrow</span></button>
-<button class="text-white hover:text-primary transition-colors" title="Next Marker"><span class="material-symbols-outlined text-3xl">skip_next</span></button>
-<button class="text-white hover:text-primary transition-colors" title="Jump Forward 10s"><span class="material-symbols-outlined text-3xl">forward_10</span></button>
-</div>
-</div>
-<div class="h-72 border-t-2 border-white bg-[#0f0f0f] flex flex-col shrink-0 relative overflow-hidden">
-<div class="absolute top-0 bottom-0 left-[35%] w-0.5 bg-primary z-30 pointer-events-none mix-blend-screen">
-<div class="absolute top-0 -left-2 w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[10px] border-t-primary"></div>
-</div>
-<div class="h-10 border-b border-border-color flex items-end px-4 relative overflow-hidden bg-surface">
-<div class="absolute inset-0 flex items-end pl-[35%] gap-[50px] text-[10px] font-mono text-text-muted select-none">
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-3 w-px bg-white absolute bottom-0"></div><span class="absolute bottom-4 -translate-x-1/2 font-bold text-white">01:20</span></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-3 w-px bg-white absolute bottom-0"></div><span class="absolute bottom-4 -translate-x-1/2 font-bold text-white">01:23</span></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-1.5 w-px bg-border-color absolute bottom-0"></div></div>
-<div class="relative h-full flex flex-col justify-end pb-1 w-0"><div class="h-3 w-px bg-white absolute bottom-0"></div><span class="absolute bottom-4 -translate-x-1/2 font-bold text-white">01:26</span></div>
-</div>
-</div>
-<div class="flex-1 flex flex-col relative overflow-hidden bg-[linear-gradient(to_right,#333_1px,transparent_1px)] bg-[size:50px_100%]">
-<div class="flex-1 border-b border-border-color relative flex items-center hover:bg-surface-light transition-colors group bg-surface">
-<div class="absolute left-0 top-0 bottom-0 w-12 bg-black flex items-center justify-center border-r border-border-color z-10 shrink-0">
-<span class="text-white font-black text-sm">Q</span>
-</div>
-<div class="absolute h-10 bg-black border-2 border-white flex items-center px-3 left-[20%] w-[12%] cursor-pointer hover:bg-surface-light transition-colors">
-<span class="text-[10px] font-mono text-white truncate pointer-events-none uppercase font-bold tracking-wider">Early Life</span>
-</div>
-<div class="absolute h-10 bg-primary border-2 border-white flex items-center px-3 left-[35%] w-[18%] cursor-pointer shadow-[4px_4px_0px_rgba(255,255,255,0.2)]">
-<span class="text-[10px] font-mono text-black truncate pointer-events-none font-black uppercase tracking-wider">"I always knew..."</span>
-<div class="absolute right-0 top-0 bottom-0 w-2 bg-black/20 cursor-ew-resize hover:bg-black/50"></div>
-</div>
-</div>
-<div class="flex-1 border-b border-border-color relative flex items-center hover:bg-surface-light transition-colors bg-surface">
-<div class="absolute left-0 top-0 bottom-0 w-12 bg-black flex items-center justify-center border-r border-border-color z-10 shrink-0">
-<span class="text-white font-black text-sm">B</span>
-</div>
-<div class="absolute h-10 bg-black/80 border-2 border-dashed border-white flex items-center px-3 left-[10%] w-[8%] cursor-pointer hover:bg-surface-light transition-colors">
-<span class="text-[10px] font-mono text-white truncate pointer-events-none uppercase tracking-wider">City Estab.</span>
-</div>
-<div class="absolute h-10 bg-black/80 border-2 border-dashed border-white flex items-center px-3 left-[55%] w-[15%] cursor-pointer hover:bg-surface-light transition-colors">
-<span class="text-[10px] font-mono text-white truncate pointer-events-none uppercase tracking-wider">Traffic Pan</span>
-</div>
-</div>
-<div class="flex-1 relative flex items-center hover:bg-surface-light transition-colors bg-surface">
-<div class="absolute left-0 top-0 bottom-0 w-12 bg-black flex items-center justify-center border-r border-border-color z-10 shrink-0">
-<span class="text-white font-black text-sm">I</span>
-</div>
-<div class="absolute h-10 bg-surface border-2 border-dotted border-white flex items-center px-3 left-[80%] w-[10%] cursor-pointer hover:bg-surface-light transition-colors">
-<span class="text-[10px] font-mono text-white truncate pointer-events-none uppercase tracking-wider">Key Theme</span>
+<div class="flex items-center gap-2 text-[10px] text-slate-500">
+<span>PAGE 1 OF 3</span>
+<div class="flex gap-1">
+<button class="size-5 flex items-center justify-center border border-accent/20 hover:bg-accent/10">&lt;</button>
+<button class="size-5 flex items-center justify-center border border-accent/20 hover:bg-accent/10">&gt;</button>
 </div>
 </div>
 </div>
 </div>
-</section>
-<aside class="w-full md:w-96 border-l border-border-color bg-background-dark flex flex-col shrink-0 overflow-hidden">
-<div class="p-4 border-b border-border-color flex justify-between items-center bg-surface">
-<h3 class="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
-<span class="material-symbols-outlined text-[18px]">list_alt</span>
-          Event Manifest
-        </h3>
-<span class="text-xs font-mono font-bold bg-white text-black px-2 py-1">4 items</span>
 </div>
-<div class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-<div class="p-4 border border-border-color hover:border-white transition-colors flex flex-col gap-2 group cursor-pointer bg-surface">
-<div class="flex items-center justify-between">
-<div class="flex items-center gap-3">
-<div class="size-3 border border-white"></div>
-<span class="text-xs font-mono font-bold text-text-muted group-hover:text-white transition-colors">00:00:45:10</span>
-</div>
-<span class="text-[10px] uppercase font-black text-white border border-dashed border-white px-2 py-0.5">B-Roll</span>
-</div>
-<p class="text-sm text-text-muted mt-1 group-hover:text-white transition-colors">City Establishing shot.</p>
-</div>
-<div class="p-4 border border-border-color hover:border-white transition-colors flex flex-col gap-2 group cursor-pointer bg-surface">
-<div class="flex items-center justify-between">
-<div class="flex items-center gap-3">
-<div class="size-3 bg-white"></div>
-<span class="text-xs font-mono font-bold text-text-muted group-hover:text-white transition-colors">00:01:10:05</span>
-</div>
-<span class="text-[10px] uppercase font-black text-white border border-white px-2 py-0.5">Quote</span>
-</div>
-<p class="text-sm text-text-muted mt-1 italic group-hover:text-white transition-colors">"It was a different time back then..."</p>
-</div>
-<div class="p-4 border-2 border-primary bg-surface-light flex flex-col gap-2 relative shadow-sharp-primary">
-<div class="flex items-center justify-between">
-<div class="flex items-center gap-3">
-<div class="size-3 bg-primary animate-pulse"></div>
-<span class="text-xs font-mono font-black text-primary">00:01:23:14</span>
-</div>
-<span class="text-[10px] uppercase font-black text-black bg-primary px-2 py-0.5">Quote</span>
-</div>
-<p class="text-sm text-white font-medium mt-1">"I always knew I wanted to build something."</p>
-<div class="mt-2">
-<input class="w-full bg-black border border-border-color text-xs px-3 py-2 text-white placeholder-text-muted focus:outline-none focus:border-primary font-mono" placeholder="Add notes... (Enter to save)" type="text" value="Crucial moment for narrative arc."/>
-</div>
-</div>
-<div class="p-4 border border-border-color hover:border-white transition-colors flex flex-col gap-2 group cursor-pointer bg-surface opacity-50">
-<div class="flex items-center justify-between">
-<div class="flex items-center gap-3">
-<div class="size-3 border border-dotted border-white"></div>
-<span class="text-xs font-mono font-bold text-text-muted group-hover:text-white transition-colors">00:04:12:20</span>
-</div>
-<span class="text-[10px] uppercase font-black text-white border border-dotted border-white px-2 py-0.5">Insight</span>
-</div>
-<p class="text-sm text-text-muted mt-1 group-hover:text-white transition-colors">Key realization about the market.</p>
-</div>
-</div>
-<div class="p-4 border-t border-border-color bg-surface">
-<div class="flex items-center gap-2 text-xs font-bold uppercase text-text-muted mb-2 tracking-wide">
-<span class="material-symbols-outlined text-[14px]">keyboard</span>
-<span>Press <b>[Tag Key]</b> to log at playhead</span>
-</div>
-</div>
-</aside>
 </main>
+<aside class="w-72 border-l border-accent/10 bg-obsidian/80 flex flex-col hidden xl:flex">
+<div class="p-4 border-b border-accent/10 bg-accent/5">
+<h3 class="text-[10px] font-bold text-accent uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">neurology</span>
+                Agent Thinking Process
+            </h3>
+</div>
+<div class="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-[11px] terminal-scroll">
+<div class="space-y-1">
+<span class="text-accent">[14:32:01]</span>
+<p class="text-slate-400">Context matching for @sarah_codes query...</p>
+<p class="text-green-500/70">&gt; Found match in 'nextjs-guide.md' (89% confidence)</p>
+</div>
+<div class="space-y-1">
+<span class="text-accent">[14:32:05]</span>
+<p class="text-slate-400">Synthesizing reply using technical_support_persona</p>
+<div class="h-1 w-full bg-accent/10 rounded overflow-hidden">
+<div class="h-full bg-accent w-2/3"></div>
+</div>
+</div>
+<div class="space-y-1 border-l border-accent/20 pl-2">
+<span class="text-slate-500">KNOWLEDGE_RESOURCES:</span>
+<ul class="text-[10px] space-y-1">
+<li class="flex items-center gap-1"><span class="material-symbols-outlined text-[10px]">link</span> docs/v2/sdk-init</li>
+<li class="flex items-center gap-1"><span class="material-symbols-outlined text-[10px]">link</span> github/next-issue-983</li>
+</ul>
+</div>
+<div class="pt-4 border-t border-accent/10">
+<h4 class="text-[9px] text-slate-500 uppercase mb-2">Social Pulse</h4>
+<div class="space-y-3">
+<div class="flex justify-between items-end">
+<span class="text-[10px]">Discord</span>
+<span class="text-[10px] text-accent">Active</span>
+</div>
+<div class="h-10 w-full flex items-end gap-[1px]">
+<div class="flex-1 bg-accent/20 h-[20%]"></div>
+<div class="flex-1 bg-accent/20 h-[40%]"></div>
+<div class="flex-1 bg-accent/40 h-[80%]"></div>
+<div class="flex-1 bg-accent/60 h-[100%]"></div>
+<div class="flex-1 bg-accent/40 h-[60%]"></div>
+<div class="flex-1 bg-accent/20 h-[30%]"></div>
+<div class="flex-1 bg-accent/20 h-[50%]"></div>
+<div class="flex-1 bg-accent/40 h-[90%]"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 border-t border-accent/10 bg-black/20">
+<div class="flex items-center gap-3">
+<div class="size-2 rounded-full bg-accent animate-pulse"></div>
+<div>
+<p class="text-[10px] text-slate-500">AGENT_STATUS</p>
+<p class="text-[11px] text-accent uppercase font-bold">Waiting for input...</p>
+</div>
+</div>
+</div>
+</aside>
+</div>
 
 </body></html>

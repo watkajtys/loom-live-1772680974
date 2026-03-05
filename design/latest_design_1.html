@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Advoloom Content Pipeline View</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#256af4",
+                        "accent": "#00f2ff",
+                        "published": "#10b981", // Terminal Green
+                        "background-light": "#f5f6f8",
+                        "background-dark": "#0a0c10",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        .glass-card {
+            background: rgba(25, 30, 45, 0.4);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 242, 255, 0.1);
+            transition: all 0.2s ease;
+        }
+        .glass-card:hover {
+            border-color: rgba(0, 242, 255, 0.4);
+            background: rgba(25, 30, 45, 0.6);
+        }
+        .kanban-column {
+            background: rgba(10, 12, 16, 0.5);
+            border: 1px dashed rgba(37, 106, 244, 0.2);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #256af444;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-background-dark text-slate-100 font-display selection:bg-accent/30 selection:text-accent overflow-hidden">
+<div class="flex h-screen">
+<aside class="w-16 flex flex-col items-center py-6 border-r border-primary/20 bg-background-dark z-20">
+<div class="mb-10 text-accent">
+<span class="material-symbols-outlined text-3xl">terminal</span>
+</div>
+<nav class="flex flex-col gap-8 flex-1">
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="absolute left-14 hidden group-hover:block bg-background-dark border border-primary/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Home</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">smart_toy</span>
+<span class="absolute left-14 hidden group-hover:block bg-background-dark border border-primary/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Agents</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg bg-primary/20 text-accent" href="#">
+<span class="material-symbols-outlined">view_kanban</span>
+<span class="absolute left-14 hidden group-hover:block bg-background-dark border border-primary/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Pipeline</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 rounded-lg text-slate-400 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="absolute left-14 hidden group-hover:block bg-background-dark border border-primary/20 px-2 py-1 text-xs rounded whitespace-nowrap z-50">Analytics</span>
+</a>
+</nav>
+<div class="flex flex-col gap-6">
+<button class="text-slate-400 hover:text-accent transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="size-8 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-[10px] font-bold text-accent">
+                    AV
+                </div>
+</div>
+</aside>
+<main class="flex-1 flex flex-col min-w-0 bg-[radial-gradient(circle_at_50%_0%,_rgba(37,106,244,0.08)_0%,_transparent_70%)]">
+<header class="h-14 border-b border-primary/20 flex items-center justify-between px-6 bg-background-dark/50 backdrop-blur-md">
+<div class="flex items-center gap-4">
+<h1 class="text-accent text-sm font-mono tracking-widest uppercase">Pipeline::Content_Lifecycle</h1>
+<div class="h-4 w-px bg-primary/20"></div>
+<div class="flex items-center gap-2 text-[10px] font-mono">
+<span class="text-slate-500 uppercase">Active Cycles:</span>
+<span class="text-accent">24</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4">
+<button class="flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary/40 rounded text-xs text-accent font-mono hover:bg-primary/30 transition-all">
+<span class="material-symbols-outlined text-sm">add</span>
+                            MANUAL_INGEST
+                        </button>
+<div class="h-6 w-px bg-primary/20"></div>
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-slate-400">notifications</span>
+</div>
+</div>
+</div>
+</header>
+<div class="flex-1 overflow-x-auto p-6 flex gap-6 custom-scrollbar">
+<div class="w-80 flex-shrink-0 flex flex-col gap-4">
+<div class="flex items-center justify-between px-2">
+<div class="flex items-center gap-2">
+<span class="text-xs font-mono font-bold text-slate-400">01</span>
+<h2 class="text-sm font-display font-bold uppercase tracking-wider">Ingested SDK</h2>
+</div>
+<span class="px-2 py-0.5 bg-primary/10 rounded-full text-[10px] font-mono text-primary">08</span>
+</div>
+<div class="flex-1 kanban-column rounded-xl p-3 flex flex-col gap-3 custom-scrollbar overflow-y-auto">
+<div class="glass-card p-4 rounded-lg flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-accent">GH_PUSH_4492</span>
+<span class="material-symbols-outlined text-sm text-slate-500">more_horiz</span>
+</div>
+<h3 class="text-sm font-medium leading-tight">Implement Webhooks in Node.js SDK v2.4</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-[9px] font-mono text-blue-400">DOCS_UPDATE</span>
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">article</span> BLOG
+                                </span>
+</div>
+<div class="pt-2 border-t border-primary/10 flex items-center justify-between">
+<span class="text-[10px] font-mono text-slate-500">2h ago</span>
+<button class="text-[10px] font-mono text-accent hover:underline">VIEW PREVIEW</button>
+</div>
+</div>
+<div class="glass-card p-4 rounded-lg flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-accent">CLI_UPDATE_V8</span>
+<span class="material-symbols-outlined text-sm text-slate-500">more_horiz</span>
+</div>
+<h3 class="text-sm font-medium leading-tight">Advanced CLI Filtering Commands</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-[9px] font-mono text-blue-400">TUTORIAL</span>
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">terminal</span> X
+                                </span>
+</div>
+<div class="pt-2 border-t border-primary/10 flex items-center justify-between">
+<span class="text-[10px] font-mono text-slate-500">4h ago</span>
+<button class="text-[10px] font-mono text-accent hover:underline">VIEW PREVIEW</button>
+</div>
+</div>
+</div>
+</div>
+<div class="w-80 flex-shrink-0 flex flex-col gap-4">
+<div class="flex items-center justify-between px-2">
+<div class="flex items-center gap-2">
+<span class="text-xs font-mono font-bold text-slate-400">02</span>
+<h2 class="text-sm font-display font-bold uppercase tracking-wider">Drafting</h2>
+</div>
+<span class="px-2 py-0.5 bg-yellow-500/10 rounded-full text-[10px] font-mono text-yellow-500">03</span>
+</div>
+<div class="flex-1 kanban-column rounded-xl p-3 flex flex-col gap-3 custom-scrollbar overflow-y-auto">
+<div class="glass-card p-4 rounded-lg border-l-2 border-l-yellow-500 flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-2">
+<span class="size-2 rounded-full bg-yellow-500 animate-pulse"></span>
+<span class="text-[10px] font-mono text-yellow-500">GENERATING...</span>
+</div>
+<span class="material-symbols-outlined text-sm text-slate-500">more_horiz</span>
+</div>
+<h3 class="text-sm font-medium leading-tight">Optimizing Data Streams for Edge Workers</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">hub</span> DISCORD
+                                </span>
+</div>
+<div class="pt-2 border-t border-primary/10 flex items-center justify-between">
+<span class="text-[10px] font-mono text-slate-500">Agent: Llama-3-70B</span>
+<button class="text-[10px] font-mono text-accent hover:underline uppercase">Halt</button>
+</div>
+</div>
+</div>
+</div>
+<div class="w-80 flex-shrink-0 flex flex-col gap-4">
+<div class="flex items-center justify-between px-2">
+<div class="flex items-center gap-2">
+<span class="text-xs font-mono font-bold text-slate-400">03</span>
+<h2 class="text-sm font-display font-bold uppercase tracking-wider">Approval</h2>
+</div>
+<span class="px-2 py-0.5 bg-primary/10 rounded-full text-[10px] font-mono text-primary">05</span>
+</div>
+<div class="flex-1 kanban-column rounded-xl p-3 flex flex-col gap-3 custom-scrollbar overflow-y-auto">
+<div class="glass-card p-4 rounded-lg flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<span class="text-[10px] font-mono text-slate-400">READY_FOR_HUMAN</span>
+<span class="material-symbols-outlined text-sm text-slate-500">more_horiz</span>
+</div>
+<h3 class="text-sm font-medium leading-tight">Security Best Practices for API Gateways</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">article</span> BLOG
+                                </span>
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">alternate_email</span> X
+                                </span>
+</div>
+<div class="flex gap-2 mt-2">
+<button class="flex-1 px-3 py-1.5 bg-primary/20 border border-primary/40 rounded text-[10px] font-mono text-accent hover:bg-primary/30 uppercase">Approve</button>
+<button class="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-[10px] font-mono text-slate-300 hover:bg-slate-700 uppercase">Edit</button>
+</div>
+</div>
+</div>
+</div>
+<div class="w-80 flex-shrink-0 flex flex-col gap-4">
+<div class="flex items-center justify-between px-2">
+<div class="flex items-center gap-2">
+<span class="text-xs font-mono font-bold text-published">04</span>
+<h2 class="text-sm font-display font-bold uppercase tracking-wider text-published">Published</h2>
+</div>
+<span class="px-2 py-0.5 bg-published/10 rounded-full text-[10px] font-mono text-published">128</span>
+</div>
+<div class="flex-1 kanban-column rounded-xl p-3 flex flex-col gap-3 custom-scrollbar overflow-y-auto border-published/20">
+<div class="glass-card p-4 rounded-lg border-l-2 border-l-published flex flex-col gap-3 bg-published/5">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-published">check_circle</span>
+<span class="text-[10px] font-mono text-published uppercase">Active</span>
+</div>
+<span class="material-symbols-outlined text-sm text-slate-500">launch</span>
+</div>
+<h3 class="text-sm font-medium leading-tight">Mastering Auth Flow with Advoloom SDK</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-1.5 py-0.5 rounded bg-published/10 border border-published/20 text-[9px] font-mono text-published flex items-center gap-1 uppercase">
+<span class="material-symbols-outlined text-[10px]">public</span> Published
+                                </span>
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">article</span> BLOG
+                                </span>
+</div>
+<div class="pt-2 border-t border-published/10 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-mono text-slate-400">Views: 1.4k</span>
+</div>
+<button class="text-[10px] font-mono text-accent hover:underline uppercase">Analytics</button>
+</div>
+</div>
+<div class="glass-card p-4 rounded-lg border-l-2 border-l-published flex flex-col gap-3 bg-published/5">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-published">check_circle</span>
+<span class="text-[10px] font-mono text-published uppercase">Active</span>
+</div>
+<span class="material-symbols-outlined text-sm text-slate-500">launch</span>
+</div>
+<h3 class="text-sm font-medium leading-tight">Quick Start: Python SDK 101</h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-1.5 py-0.5 rounded bg-published/10 border border-published/20 text-[9px] font-mono text-published flex items-center gap-1 uppercase">
+<span class="material-symbols-outlined text-[10px]">public</span> Published
+                                </span>
+<span class="px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-[9px] font-mono text-slate-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[10px]">hub</span> DISCORD
+                                </span>
+</div>
+<div class="pt-2 border-t border-published/10 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-mono text-slate-400">Reach: 842</span>
+</div>
+<button class="text-[10px] font-mono text-accent hover:underline uppercase">Analytics</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<footer class="h-12 border-t border-primary/20 bg-background-dark/50 flex items-center justify-between px-6">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Throughput</span>
+<span class="text-xs font-mono text-accent">4.2 tutorials/day</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Avg. Draft Time</span>
+<span class="text-xs font-mono text-accent">14m 22s</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Quality Score</span>
+<span class="text-xs font-mono text-green-400">9.4/10</span>
+</div>
+</div>
+<div class="flex items-center gap-4 text-[10px] font-mono text-slate-500 uppercase">
+<span class="flex items-center gap-1">
+<span class="size-2 rounded-full bg-green-500"></span> 
+                        Auto-Writer: Operational
+                    </span>
+<span class="flex items-center gap-1">
+<span class="size-2 rounded-full bg-accent"></span> 
+                        Vector DB: Synced
+                    </span>
+</div>
+</footer>
+</main>
+</div>
+
+</body></html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Advoloom Knowledge Base Manager</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#00f2ff", // Neon Cyan
+                        "accent": "#00f2ff",
+                        "background-obsidian": "#050608", // Obsidian Black
+                        "panel-dark": "#0d0f14",
+                    },
+                    fontFamily: {
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: {"DEFAULT": "0px", "lg": "2px", "xl": "4px"},
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        @layer base {
+            body {
+                @apply font-mono bg-background-obsidian text-slate-300;
+            }
+        }
+        .glass-panel {
+            background: rgba(13, 15, 20, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 242, 255, 0.15);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 242, 255, 0.05);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(0, 242, 255, 0.3);
+        }
+        .tree-line::before {
+            content: '';
+            position: absolute;
+            left: -1rem;
+            top: 0.5rem;
+            width: 1px;
+            height: 100%;
+            background: rgba(0, 242, 255, 0.1);
+        }
+        .tree-item-active {
+            background: linear-gradient(90deg, rgba(0, 242, 255, 0.1) 0%, transparent 100%);
+            border-left: 2px solid #00f2ff;
+        }
+    </style>
+</head>
+<body class="selection:bg-accent/30 selection:text-accent">
+<div class="flex h-screen overflow-hidden">
+<aside class="w-16 flex flex-col items-center py-6 border-r border-accent/20 bg-background-obsidian z-20">
+<div class="mb-10 text-accent">
+<span class="material-symbols-outlined text-3xl">database</span>
+</div>
+<nav class="flex flex-col gap-8 flex-1">
+<a class="group relative flex items-center justify-center p-2 text-slate-500 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 bg-accent/10 text-accent border-l-2 border-accent" href="#">
+<span class="material-symbols-outlined">folder_managed</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 text-slate-500 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">hub</span>
+</a>
+<a class="group relative flex items-center justify-center p-2 text-slate-500 hover:text-accent transition-colors" href="#">
+<span class="material-symbols-outlined">analytics</span>
+</a>
+</nav>
+<div class="flex flex-col gap-6 mb-4">
+<button class="text-slate-500 hover:text-accent transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="size-8 border border-accent/40 flex items-center justify-center text-[10px] font-bold text-accent">
+                    KB
+                </div>
+</div>
+</aside>
+<main class="flex-1 flex flex-col overflow-hidden">
+<header class="h-14 border-b border-accent/20 flex items-center justify-between px-6 bg-panel-dark">
+<div class="flex items-center gap-4">
+<span class="text-accent text-xs font-bold tracking-[0.2em] uppercase">Knowledge_Base::Manager</span>
+<div class="h-4 w-px bg-accent/20"></div>
+<div class="relative flex items-center">
+<input class="bg-transparent border-none focus:ring-0 text-xs text-accent placeholder:text-accent/30 w-64 font-mono" placeholder="SEARCH_VECTORS..." type="text"/>
+<span class="material-symbols-outlined text-sm text-accent/50 absolute right-0">search</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-3 text-xs">
+<span class="text-slate-500 uppercase">Total Vectors:</span>
+<span class="text-accent">1.24M</span>
+<div class="h-3 w-px bg-accent/20"></div>
+<span class="text-slate-500 uppercase">Storage:</span>
+<span class="text-accent">4.2 GB</span>
+</div>
+<button class="bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent px-3 py-1 text-[10px] uppercase font-bold transition-all">
+                        Force_Reindex
+                    </button>
+</div>
+</header>
+<div class="flex-1 flex overflow-hidden">
+<nav class="w-80 border-r border-accent/10 bg-panel-dark/30 flex flex-col">
+<div class="p-4 border-b border-accent/10 flex justify-between items-center bg-panel-dark/50">
+<span class="text-[10px] uppercase font-bold text-accent tracking-widest">Sources_Explorer</span>
+<span class="material-symbols-outlined text-sm text-accent cursor-pointer">create_new_folder</span>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-4">
+<div class="space-y-4">
+<div>
+<div class="flex items-center gap-2 text-slate-100 mb-2 cursor-pointer group">
+<span class="material-symbols-outlined text-sm text-accent">expand_more</span>
+<span class="material-symbols-outlined text-lg text-accent/70">auto_stories</span>
+<span class="text-xs font-bold uppercase tracking-tight">Documentation</span>
+</div>
+<div class="ml-6 space-y-1 relative">
+<div class="tree-line"></div>
+<div class="flex items-center gap-2 p-2 text-xs text-slate-400 hover:text-accent cursor-pointer border-l border-transparent">
+<span class="material-symbols-outlined text-sm">description</span>
+<span>v2.4_API_Reference.md</span>
+</div>
+<div class="flex items-center gap-2 p-2 text-xs text-accent tree-item-active cursor-pointer">
+<span class="material-symbols-outlined text-sm">description</span>
+<span>Auth_Flow_Architecture.pdf</span>
+</div>
+<div class="flex items-center gap-2 p-2 text-xs text-slate-400 hover:text-accent cursor-pointer">
+<span class="material-symbols-outlined text-sm">description</span>
+<span>SDK_Quickstart_Guide.txt</span>
+</div>
+</div>
+</div>
+<div>
+<div class="flex items-center gap-2 text-slate-100 mb-2 cursor-pointer group">
+<span class="material-symbols-outlined text-sm text-slate-600">chevron_right</span>
+<span class="material-symbols-outlined text-lg text-accent/70">code</span>
+<span class="text-xs font-bold uppercase tracking-tight">GitHub_Repos</span>
+</div>
+</div>
+<div>
+<div class="flex items-center gap-2 text-slate-100 mb-2 cursor-pointer group">
+<span class="material-symbols-outlined text-sm text-accent">expand_more</span>
+<span class="material-symbols-outlined text-lg text-accent/70">forum</span>
+<span class="text-xs font-bold uppercase tracking-tight">Discord_Archives</span>
+</div>
+<div class="ml-6 space-y-1">
+<div class="flex items-center gap-2 p-2 text-xs text-slate-400 hover:text-accent cursor-pointer">
+<span class="material-symbols-outlined text-sm">history</span>
+<span>#troubleshooting_2023_Q4</span>
+</div>
+<div class="flex items-center gap-2 p-2 text-xs text-slate-400 hover:text-accent cursor-pointer">
+<span class="material-symbols-outlined text-sm">history</span>
+<span>#product-feedback-all</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</nav>
+<section class="flex-1 overflow-y-auto custom-scrollbar p-8 bg-[radial-gradient(circle_at_50%_-20%,_rgba(0,242,255,0.08)_0%,_transparent_50%)]">
+<div class="flex justify-between items-start mb-8">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<h1 class="text-2xl font-bold text-white tracking-tight">Auth_Flow_Architecture.pdf</h1>
+<span class="px-2 py-0.5 text-[10px] bg-accent/20 text-accent border border-accent/30 font-bold">SOURCE_LOCAL</span>
+</div>
+<p class="text-sm text-slate-500">Path: /knowledge-base/documentation/internal/auth-flow-v2.pdf</p>
+</div>
+<div class="flex gap-4">
+<div class="text-right">
+<p class="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Last Sync</p>
+<p class="text-xs text-slate-200">2023-11-24 14:02:11 UTC</p>
+</div>
+<div class="h-8 w-px bg-accent/20"></div>
+<div class="text-right">
+<p class="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Embed Status</p>
+<p class="text-xs text-green-400">OPTIMIZED [100%]</p>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-6 mb-8">
+<div class="glass-panel p-4">
+<span class="text-[10px] text-accent/60 uppercase block mb-2">Vector Count</span>
+<span class="text-xl font-bold text-white">4,281</span>
+</div>
+<div class="glass-panel p-4">
+<span class="text-[10px] text-accent/60 uppercase block mb-2">Dimensions</span>
+<span class="text-xl font-bold text-white">1,536</span>
+</div>
+<div class="glass-panel p-4">
+<span class="text-[10px] text-accent/60 uppercase block mb-2">Inference Load</span>
+<span class="text-xl font-bold text-white">0.42ms</span>
+</div>
+</div>
+<div class="flex flex-col h-[500px]">
+<div class="bg-panel-dark border-x border-t border-accent/20 px-4 py-2 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-accent">visibility</span>
+<span class="text-[10px] uppercase font-bold tracking-widest text-slate-400">Ingested_Content_Preview</span>
+</div>
+<div class="flex gap-1">
+<div class="size-2 rounded-full bg-slate-700"></div>
+<div class="size-2 rounded-full bg-slate-700"></div>
+<div class="size-2 rounded-full bg-slate-700"></div>
+</div>
+</div>
+<div class="flex-1 bg-black p-6 font-mono text-sm border border-accent/20 overflow-y-auto custom-scrollbar relative">
+<div class="absolute left-0 top-0 bottom-0 w-12 bg-panel-dark/50 border-r border-accent/5 flex flex-col items-center py-6 text-slate-700 text-[10px] select-none">
+<span>01</span><span>02</span><span>03</span><span>04</span><span>05</span><span>06</span><span>07</span><span>08</span><span>09</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span>
+</div>
+<div class="ml-10">
+<div class="mb-4">
+<span class="text-accent/60">// Source: Auth_Flow_Architecture.pdf - Page 1</span><br/>
+<span class="text-accent"># Authentication and Authorization Overview</span>
+</div>
+<div class="text-slate-300 leading-relaxed mb-4">
+                                    The Advoloom agent utilizes a multi-layered authentication strategy. 
+                                    By default, all requests are routed through the <span class="text-accent">OAuth2.0</span> gateway. 
+                                    JWT tokens are issued with a 15-minute TTL.
+                                </div>
+<div class="text-slate-300 leading-relaxed mb-4">
+<span class="text-accent">Vector_Mapping_Note:</span> This section is linked to the 
+                                    <span class="text-accent/80">'User_Access_Control'</span> neural cluster.
+                                </div>
+<div class="p-4 bg-accent/5 border-l-2 border-accent mb-4">
+<span class="text-accent/70">CRITICAL:</span> Ensure the callback URL is correctly whitelisted in 
+                                    the integration settings before initializing the vector re-sync.
+                                </div>
+<div class="text-slate-300 leading-relaxed">
+                                    The agent maintains state through a session-based approach, mapping 
+                                    the <span class="text-accent">X-API-KEY</span> header to specific workspace permissions. 
+                                    Rate limiting is applied at the gateway level.
+                                </div>
+<div class="mt-8 flex items-center gap-2">
+<span class="text-accent animate-pulse">_</span>
+</div>
+</div>
+</div>
+<div class="bg-panel-dark border-x border-b border-accent/20 px-4 py-2 flex justify-between items-center">
+<span class="text-[9px] text-slate-500 uppercase">UTF-8 | PDF_RAW_BYTES | LINE: 142</span>
+<div class="flex gap-4">
+<button class="text-[9px] text-accent uppercase hover:underline">Download_Original</button>
+<button class="text-[9px] text-accent uppercase hover:underline">Re-chunk_Data</button>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+</div>
+
+</body></html>
